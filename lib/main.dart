@@ -1,20 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:timezone/data/latest_all.dart' as tzdata;
 
-void main() {
-  runApp(const MainApp());
-}
+import 'src/background/update_worker.dart';
+import 'src/ui/app.dart';
 
-class MainApp extends StatelessWidget {
-  const MainApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const MaterialApp(
-      home: Scaffold(
-        body: Center(
-          child: Text('Hello World!'),
-        ),
-      ),
-    );
-  }
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  tzdata.initializeTimeZones();
+  await registerMonthlyUpdateTask();
+  runApp(const ProviderScope(child: TrenApp()));
 }

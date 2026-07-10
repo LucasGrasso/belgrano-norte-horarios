@@ -27,10 +27,14 @@ class TrenApp extends StatelessWidget {
     ThemeData themed(ColorScheme s, {required bool dark}) => ThemeData(
           colorScheme: s,
           fontFamily: 'Segoe UI',
-          scaffoldBackgroundColor: dark ? null : const Color(0xFFF6F5F4),
-          cardTheme: dark
-              ? null
-              : const CardThemeData(color: Colors.white, elevation: 1),
+          // In dark mode the M3 default card surface is nearly the same
+          // shade as the background; push the background darker and the
+          // cards lighter so they read as distinct panels.
+          scaffoldBackgroundColor:
+              dark ? const Color(0xFF101010) : const Color(0xFFF6F5F4),
+          cardTheme: CardThemeData(
+              color: dark ? const Color(0xFF262626) : Colors.white,
+              elevation: dark ? 2 : 1),
           navigationBarTheme: dark
               ? null
               : NavigationBarThemeData(

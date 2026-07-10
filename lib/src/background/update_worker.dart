@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:workmanager/workmanager.dart';
 
+import '../data/holiday_service.dart';
 import '../data/timetable_store.dart';
 import '../data/timetable_service.dart';
 import '../notifications/alert.dart';
@@ -19,10 +20,13 @@ void updateWorkerDispatcher() {
     try {
       final store = await TimetableStore.open();
       final service = TimetableService(store);
+      final holidays = await HolidayService.open();
+      final calendar = await holidays.ensureCurrentYears();
       final updated = await service.updateIfNewMonth();
       if (updated != null) {
         final scheduler = await NotificationScheduler.initialize();
-        await scheduler.rescheduleAll(await AlertStore().load(), updated);
+        await scheduler.rescheduleAll(await AlertStore().load(), updated,
+            isHoliday: calendar.isHoliday);
       }
       // Success also when not due / fetch failed: the periodic task must
       // keep running and retry on its own cadence.

@@ -14,10 +14,19 @@ class TrenApp extends StatelessWidget {
     final scheme = ColorScheme.fromSeed(seedColor: const Color(0xFFC8102E));
     final darkScheme = ColorScheme.fromSeed(
         seedColor: const Color(0xFFC8102E), brightness: Brightness.dark);
+    // scrolledUnderElevation 0 keeps the app bar the same color when content
+    // scrolls beneath it (no Material 3 surface-tint shift).
+    ThemeData themed(ColorScheme s) => ThemeData(
+          colorScheme: s,
+          appBarTheme: AppBarTheme(
+            backgroundColor: s.surface,
+            scrolledUnderElevation: 0,
+          ),
+        );
     return MaterialApp(
       title: 'Tren Belgrano Norte',
-      theme: ThemeData(colorScheme: scheme),
-      darkTheme: ThemeData(colorScheme: darkScheme),
+      theme: themed(scheme),
+      darkTheme: themed(darkScheme),
       home: const _Shell(),
     );
   }
@@ -36,9 +45,11 @@ class _ShellState extends ConsumerState<_Shell> {
   @override
   void initState() {
     super.initState();
-    // Silent monthly check once the first frame is up.
+    // Silent monthly timetable check + yearly feriados fetch once the first
+    // frame is up.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(timetableProvider.notifier).monthlyCheck();
+      ref.read(holidaysProvider.notifier).refresh();
     });
   }
 

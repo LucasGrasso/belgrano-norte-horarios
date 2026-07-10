@@ -107,6 +107,23 @@ void main() {
     expect(r.first.departs.hour, 11);
   });
 
+  test('holiday resolver overrides per service day', () {
+    // Monday 2026-07-06 marked feriado by the downloaded calendar: the
+    // sunday/holiday table applies even without the manual toggle.
+    bool? resolver(DateTime d) => d.day == 6 && d.month == 7;
+    final r = findNextDepartures(t,
+        from: 0, to: 22, when: at(6, 9), isHoliday: resolver);
+    expect(r.first.trainNumber, 301);
+    // The next day (not feriado) contributes its weekday train.
+    expect(r.map((d) => d.trainNumber), contains(101));
+  });
+
+  test('resolver returning null falls back to manual toggle', () {
+    final r = findNextDepartures(t,
+        from: 0, to: 22, when: at(6, 9), holiday: true, isHoliday: (_) => null);
+    expect(r.first.trainNumber, 301);
+  });
+
   test('friday night train crossing into saturday is found early saturday', () {
     // Friday 2026-07-10 23:45 weekday train arrives Saturday 01:15.
     // Query Saturday 00:30 from an intermediate? Origin departure already

@@ -79,10 +79,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               'Horarios oficiales del tren Belgrano Norte (Ferrovías), '
               'descargados de trenbelgranonorte.com.ar y guardados en el '
               'teléfono: la app funciona sin conexión.\n\n'
-              'Los feriados se rigen por el cuadro de domingos: usá el '
-              'interruptor "Feriado" en la búsqueda. Las alertas de días '
-              'feriados mostrarán el horario del día de semana '
-              'correspondiente.',
+              'Los feriados nacionales se detectan automáticamente con el '
+              'calendario oficial de argentina.gob.ar y usan los horarios '
+              'de domingo.',
             ),
           ),
         ),

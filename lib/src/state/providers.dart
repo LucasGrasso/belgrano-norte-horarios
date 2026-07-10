@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/holiday_service.dart';
 import '../data/timetable_service.dart';
 import '../data/timetable_store.dart';
 import '../domain/models.dart';
@@ -13,6 +14,25 @@ final timetableServiceProvider = FutureProvider<TimetableService>((ref) async {
 
 final notificationSchedulerProvider =
     FutureProvider<NotificationScheduler>((ref) => NotificationScheduler.initialize());
+
+/// National-holiday calendar (feriados run the Sunday timetable).
+class HolidaysController extends AsyncNotifier<HolidayCalendar> {
+  @override
+  Future<HolidayCalendar> build() async {
+    final service = await HolidayService.open();
+    return service.load();
+  }
+
+  /// Fetches missing years (once per year in practice). Silent on failure.
+  Future<void> refresh() async {
+    final service = await HolidayService.open();
+    final updated = await service.ensureCurrentYears();
+    state = AsyncData(updated);
+  }
+}
+
+final holidaysProvider =
+    AsyncNotifierProvider<HolidaysController, HolidayCalendar>(HolidaysController.new);
 
 /// The timetable. `null` means "never fetched yet" (first-run screen).
 class TimetableController extends AsyncNotifier<Timetable?> {
@@ -51,7 +71,9 @@ class TimetableController extends AsyncNotifier<Timetable?> {
   Future<void> _rescheduleAlerts(Timetable timetable) async {
     final scheduler = await ref.read(notificationSchedulerProvider.future);
     final alerts = await ref.read(alertsProvider.future);
-    await scheduler.rescheduleAll(alerts, timetable);
+    final holidays = ref.read(holidaysProvider).value;
+    await scheduler.rescheduleAll(alerts, timetable,
+        isHoliday: holidays?.isHoliday);
   }
 }
 
@@ -88,7 +110,9 @@ class AlertsController extends AsyncNotifier<List<Alert>> {
     final timetable = ref.read(timetableProvider).value;
     if (timetable != null) {
       final scheduler = await ref.read(notificationSchedulerProvider.future);
-      await scheduler.rescheduleAll(alerts, timetable);
+      final holidays = ref.read(holidaysProvider).value;
+      await scheduler.rescheduleAll(alerts, timetable,
+          isHoliday: holidays?.isHoliday);
     }
   }
 }

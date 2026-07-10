@@ -74,24 +74,29 @@ class NotificationScheduler {
 
   /// Cancels everything and reschedules all enabled alerts against
   /// [timetable]. Call after any alert edit and after timetable updates.
-  Future<void> rescheduleAll(List<Alert> alerts, Timetable timetable) async {
+  /// [isHoliday] makes the content of the *next* occurrence feriado-aware;
+  /// the weekly repeat then reuses that content until the next reschedule
+  /// (app launch or timetable update), which bounds the drift.
+  Future<void> rescheduleAll(List<Alert> alerts, Timetable timetable,
+      {HolidayResolver? isHoliday}) async {
     await _plugin.cancelAll();
     final mode = await _scheduleMode();
     for (final alert in alerts.where((a) => a.enabled)) {
       for (final weekday in alert.weekdays) {
-        await _scheduleWeekly(alert, weekday, timetable, mode);
+        await _scheduleWeekly(alert, weekday, timetable, mode, isHoliday);
       }
     }
   }
 
   Future<void> _scheduleWeekly(Alert alert, int weekday, Timetable timetable,
-      AndroidScheduleMode mode) async {
+      AndroidScheduleMode mode, HolidayResolver? isHoliday) async {
     final fireAt = _nextInstanceOf(weekday, alert.hour, alert.minute);
     final departures = findNextDepartures(
       timetable,
       from: alert.from,
       to: alert.to,
       when: fireAt,
+      isHoliday: isHoliday,
       limit: 3,
     );
     final route = '${kStations[alert.from]} → ${kStations[alert.to]}';

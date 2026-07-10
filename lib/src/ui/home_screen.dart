@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/timezone.dart' as tz;
 
+import '../data/holiday_service.dart';
 import '../domain/models.dart';
 import '../domain/service_calendar.dart';
 import '../domain/trip_finder.dart';
@@ -19,7 +20,6 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _from = 0;
   int _to = kStations.length - 1;
-  bool _holiday = false;
 
   /// Null = "now" (recomputed on every build so results stay fresh).
   tz.TZDateTime? _customWhen;
@@ -73,6 +73,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final timetable = ref.watch(timetableProvider).value;
+    // Feriados come from the downloaded official calendar; they apply the
+    // Sunday timetable automatically, with no manual control.
+    final holidays =
+        ref.watch(holidaysProvider).value ?? const HolidayCalendar.empty();
 
     return SafeArea(
       child: Column(
@@ -82,7 +86,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             child: _SearchCard(
               from: _from,
               to: _to,
-              holiday: _holiday,
               whenLabel: _customWhen == null
                   ? 'Ahora'
                   : _formatWhen(_customWhen!),
@@ -105,7 +108,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               onWhenTap: _pickWhen,
               onWhenClear:
                   _customWhen == null ? null : () => setState(() => _customWhen = null),
-              onHoliday: (v) => setState(() => _holiday = v),
             ),
           ),
           Expanded(
@@ -116,7 +118,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     from: _from,
                     to: _to,
                     when: _when,
-                    holiday: _holiday,
+                    isHoliday: holidays.isHoliday,
                   ),
           ),
         ],
@@ -135,26 +137,22 @@ class _SearchCard extends StatelessWidget {
   const _SearchCard({
     required this.from,
     required this.to,
-    required this.holiday,
     required this.whenLabel,
     required this.onFrom,
     required this.onTo,
     required this.onSwap,
     required this.onWhenTap,
     required this.onWhenClear,
-    required this.onHoliday,
   });
 
   final int from;
   final int to;
-  final bool holiday;
   final String whenLabel;
   final ValueChanged<int> onFrom;
   final ValueChanged<int> onTo;
   final VoidCallback onSwap;
   final VoidCallback onWhenTap;
   final VoidCallback? onWhenClear;
-  final ValueChanged<bool> onHoliday;
 
   @override
   Widget build(BuildContext context) {
@@ -199,13 +197,6 @@ class _SearchCard extends StatelessWidget {
                     tooltip: 'Volver a "ahora"',
                     visualDensity: VisualDensity.compact,
                   ),
-                const Spacer(),
-                FilterChip(
-                  label: const Text('Feriado'),
-                  tooltip: 'Los feriados rigen los horarios de domingo',
-                  selected: holiday,
-                  onSelected: onHoliday,
-                ),
               ],
             ),
           ],
@@ -251,14 +242,14 @@ class _ResultsList extends StatelessWidget {
     required this.from,
     required this.to,
     required this.when,
-    required this.holiday,
+    required this.isHoliday,
   });
 
   final Timetable timetable;
   final int from;
   final int to;
   final tz.TZDateTime when;
-  final bool holiday;
+  final HolidayResolver isHoliday;
 
   @override
   Widget build(BuildContext context) {
@@ -267,7 +258,7 @@ class _ResultsList extends StatelessWidget {
       from: from,
       to: to,
       when: when,
-      holiday: holiday,
+      isHoliday: isHoliday,
       limit: 12,
     );
     if (departures.isEmpty) {
@@ -276,30 +267,126 @@ class _ResultsList extends StatelessWidget {
     return ListView.separated(
       padding: const EdgeInsets.all(16),
       itemCount: departures.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 8),
-      itemBuilder: (context, i) {
-        final d = departures[i];
-        final wait = d.departs.difference(when);
-        return Card(
-          margin: EdgeInsets.zero,
-          child: ListTile(
-            leading: CircleAvatar(
-              child: Text(_hhmm(d.departs).substring(0, 2),
-                  style: const TextStyle(fontSize: 14)),
-            ),
-            title: Text(
-              'Sale ${_hhmm(d.departs)} — llega ${_hhmm(d.arrives)}',
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            subtitle: Text(
-                'Tren ${d.trainNumber} · ${d.duration.inMinutes} min de viaje'),
-            trailing: Text(
-              _waitLabel(wait),
-              style: Theme.of(context).textTheme.labelLarge,
+      separatorBuilder: (_, _) => const SizedBox(height: 12),
+      itemBuilder: (context, i) => _DepartureCard(
+        departure: departures[i],
+        from: from,
+        to: to,
+        wait: departures[i].departs.difference(when),
+      ),
+    );
+  }
+}
+
+/// Card styled after the hand-drawn mockup (ui-idea.png): tinted header
+/// strip with the train number, big Sale/Llega times, station names below,
+/// and a dotted arrow labelled with the trip duration in between.
+class _DepartureCard extends StatelessWidget {
+  const _DepartureCard({
+    required this.departure,
+    required this.from,
+    required this.to,
+    required this.wait,
+  });
+
+  final Departure departure;
+  final int from;
+  final int to;
+  final Duration wait;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final timeStyle = theme.textTheme.displaySmall!.copyWith(
+      fontWeight: FontWeight.w700,
+      fontFeatures: const [FontFeature.tabularFigures()],
+      color: theme.colorScheme.onSurface,
+    );
+    final labelStyle = theme.textTheme.titleMedium!;
+    final stationStyle = theme.textTheme.bodySmall!;
+
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            color: theme.colorScheme.primaryContainer,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                Text(
+                  'Tren ${departure.trainNumber}',
+                  style: theme.textTheme.titleSmall!.copyWith(
+                    color: theme.colorScheme.onPrimaryContainer,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  _waitLabel(wait),
+                  style: theme.textTheme.labelMedium!.copyWith(
+                    color: theme.colorScheme.onPrimaryContainer,
+                  ),
+                ),
+              ],
             ),
           ),
-        );
-      },
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Sale', style: labelStyle),
+                    Text('Llega', style: labelStyle),
+                  ],
+                ),
+                // Big times with the dashed connector vertically centered on
+                // the same row, as in the reference design.
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Text(_hhmm(departure.departs), style: timeStyle),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: SizedBox(
+                          height: 20,
+                          child: CustomPaint(
+                            size: const Size(double.infinity, 20),
+                            painter: _DashedConnectorPainter(
+                                color: theme.colorScheme.outline),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Text(_hhmm(departure.arrives), style: timeStyle),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text('Estación ${kStations[from]}',
+                          style: stationStyle),
+                    ),
+                    Text('${departure.duration.inMinutes} min',
+                        style: theme.textTheme.labelSmall),
+                    Expanded(
+                      child: Text('Estación ${kStations[to]}',
+                          style: stationStyle, textAlign: TextAlign.right),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -312,4 +399,47 @@ class _ResultsList extends StatelessWidget {
     final m = wait.inMinutes % 60;
     return m == 0 ? 'en ${h}h' : 'en ${h}h ${m}m';
   }
+}
+
+/// Dashed line with a small circled chevron in the middle, imitating the
+/// trip connector of the reference design.
+class _DashedConnectorPainter extends CustomPainter {
+  const _DashedConnectorPainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stroke = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4
+      ..strokeCap = StrokeCap.round;
+    final y = size.height / 2;
+    final cx = size.width / 2;
+    const r = 7.0; // circled-chevron radius
+    const dash = 4.0;
+    const gap = 4.0;
+
+    void dashes(double from, double to) {
+      for (var x = from; x < to; x += dash + gap) {
+        canvas.drawLine(
+            Offset(x, y), Offset((x + dash).clamp(from, to), y), stroke);
+      }
+    }
+
+    dashes(0, cx - r - 3);
+    dashes(cx + r + 3, size.width);
+
+    canvas.drawCircle(Offset(cx, y), r, stroke);
+    final chevron = Path()
+      ..moveTo(cx - 1.5, y - 3)
+      ..lineTo(cx + 2.0, y)
+      ..lineTo(cx - 1.5, y + 3);
+    canvas.drawPath(chevron, stroke..strokeJoin = StrokeJoin.round);
+  }
+
+  @override
+  bool shouldRepaint(_DashedConnectorPainter oldDelegate) =>
+      color != oldDelegate.color;
 }

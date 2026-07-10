@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../state/providers.dart';
 import 'alerts_screen.dart';
+import 'brand.dart';
 import 'home_screen.dart';
 import 'settings_screen.dart';
 
@@ -11,23 +13,69 @@ class TrenApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = ColorScheme.fromSeed(seedColor: const Color(0xFFC8102E));
+    // fromSeed desaturates everything into pastels; pin the true brand red
+    // as primary and keep surfaces neutral so the UI reads red-on-white
+    // instead of pink.
+    final scheme = ColorScheme.fromSeed(seedColor: kBrandColor).copyWith(
+      primary: kBrandColor,
+      surface: Colors.white,
+    );
     final darkScheme = ColorScheme.fromSeed(
-        seedColor: const Color(0xFFC8102E), brightness: Brightness.dark);
-    // scrolledUnderElevation 0 keeps the app bar the same color when content
-    // scrolls beneath it (no Material 3 surface-tint shift).
-    ThemeData themed(ColorScheme s) => ThemeData(
+        seedColor: kBrandColor, brightness: Brightness.dark);
+    // The app bar is always the brand-red banner (like the official site);
+    // scrolledUnderElevation 0 keeps its color stable when content scrolls.
+    ThemeData themed(ColorScheme s, {required bool dark}) => ThemeData(
           colorScheme: s,
-          appBarTheme: AppBarTheme(
-            backgroundColor: s.surface,
+          fontFamily: 'Segoe UI',
+          scaffoldBackgroundColor: dark ? null : const Color(0xFFF6F5F4),
+          cardTheme: dark
+              ? null
+              : const CardThemeData(color: Colors.white, elevation: 1),
+          navigationBarTheme: dark
+              ? null
+              : NavigationBarThemeData(
+                  backgroundColor: Colors.white,
+                  indicatorColor: kBrandColor.withValues(alpha: 0.12),
+                ),
+          appBarTheme: const AppBarTheme(
+            backgroundColor: kBrandColor,
+            foregroundColor: Colors.white,
             scrolledUnderElevation: 0,
           ),
         );
     return MaterialApp(
       title: 'Tren Belgrano Norte',
-      theme: themed(scheme),
-      darkTheme: themed(darkScheme),
+      theme: themed(scheme, dark: false),
+      darkTheme: themed(darkScheme, dark: true),
       home: const _Shell(),
+    );
+  }
+}
+
+/// Site-style banner: white circled train logo + bold two-line wordmark.
+class _BrandTitle extends StatelessWidget {
+  const _BrandTitle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SvgPicture.asset('logo.svg', height: 40),
+        const SizedBox(width: 10),
+        const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Tren',
+                style: TextStyle(
+                    fontSize: 17, fontWeight: FontWeight.w700, height: 1.1)),
+            Text('Belgrano Norte',
+                style: TextStyle(
+                    fontSize: 17, fontWeight: FontWeight.w700, height: 1.1)),
+          ],
+        ),
+      ],
     );
   }
 }
@@ -74,11 +122,8 @@ class _ShellState extends ConsumerState<_Shell> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(switch (_tab) {
-          0 => 'Tren Belgrano Norte',
-          1 => 'Alertas',
-          _ => 'Ajustes',
-        }),
+        titleSpacing: 16,
+        title: const _BrandTitle(),
       ),
       body: body,
       bottomNavigationBar: hasData

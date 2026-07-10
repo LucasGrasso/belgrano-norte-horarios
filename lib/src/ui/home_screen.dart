@@ -8,6 +8,7 @@ import '../domain/models.dart';
 import '../domain/service_calendar.dart';
 import '../domain/trip_finder.dart';
 import '../state/providers.dart';
+import 'brand.dart';
 
 /// Search: desde/hasta + optional date-time (defaults to "now"), results list.
 class HomeScreen extends ConsumerStatefulWidget {
@@ -312,23 +313,22 @@ class _DepartureCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            color: theme.colorScheme.primaryContainer,
+            color: kBrandColor,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
               children: [
                 Text(
                   'Tren ${departure.trainNumber}',
                   style: theme.textTheme.titleSmall!.copyWith(
-                    color: theme.colorScheme.onPrimaryContainer,
-                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
                 const Spacer(),
                 Text(
                   _waitLabel(wait),
-                  style: theme.textTheme.labelMedium!.copyWith(
-                    color: theme.colorScheme.onPrimaryContainer,
-                  ),
+                  style: theme.textTheme.labelMedium!
+                      .copyWith(color: Colors.white),
                 ),
               ],
             ),

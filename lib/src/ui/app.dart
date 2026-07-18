@@ -16,37 +16,40 @@ class TrenApp extends StatelessWidget {
     // fromSeed desaturates everything into pastels; pin the true brand red
     // as primary and keep surfaces neutral so the UI reads red-on-white
     // instead of pink.
-    final scheme = ColorScheme.fromSeed(seedColor: kBrandColor).copyWith(
-      primary: kBrandColor,
-      surface: Colors.white,
-    );
+    final scheme = ColorScheme.fromSeed(
+      seedColor: kBrandColor,
+    ).copyWith(primary: kBrandColor, surface: Colors.white);
     final darkScheme = ColorScheme.fromSeed(
-        seedColor: kBrandColor, brightness: Brightness.dark);
+      seedColor: kBrandColor,
+      brightness: Brightness.dark,
+    );
     // The app bar is always the brand-red banner (like the official site);
     // scrolledUnderElevation 0 keeps its color stable when content scrolls.
     ThemeData themed(ColorScheme s, {required bool dark}) => ThemeData(
-          colorScheme: s,
-          fontFamily: 'Segoe UI',
-          // In dark mode the M3 default card surface is nearly the same
-          // shade as the background; push the background darker and the
-          // cards lighter so they read as distinct panels.
-          scaffoldBackgroundColor:
-              dark ? const Color(0xFF101010) : const Color(0xFFF6F5F4),
-          cardTheme: CardThemeData(
-              color: dark ? const Color(0xFF262626) : Colors.white,
-              elevation: dark ? 2 : 1),
-          navigationBarTheme: dark
-              ? null
-              : NavigationBarThemeData(
-                  backgroundColor: Colors.white,
-                  indicatorColor: kBrandColor.withValues(alpha: 0.12),
-                ),
-          appBarTheme: const AppBarTheme(
-            backgroundColor: kBrandColor,
-            foregroundColor: Colors.white,
-            scrolledUnderElevation: 0,
-          ),
-        );
+      colorScheme: s,
+      fontFamily: 'Segoe UI',
+      // In dark mode the M3 default card surface is nearly the same
+      // shade as the background; push the background darker and the
+      // cards lighter so they read as distinct panels.
+      scaffoldBackgroundColor: dark
+          ? const Color(0xFF101010)
+          : const Color(0xFFF6F5F4),
+      cardTheme: CardThemeData(
+        color: dark ? const Color(0xFF262626) : Colors.white,
+        elevation: dark ? 2 : 1,
+      ),
+      navigationBarTheme: dark
+          ? null
+          : NavigationBarThemeData(
+              backgroundColor: Colors.white,
+              indicatorColor: kBrandColor.withValues(alpha: 0.12),
+            ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: kBrandColor,
+        foregroundColor: Colors.white,
+        scrolledUnderElevation: 0,
+      ),
+    );
     return MaterialApp(
       title: 'Tren Belgrano Norte',
       theme: themed(scheme, dark: false),
@@ -71,12 +74,22 @@ class _BrandTitle extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Tren',
-                style: TextStyle(
-                    fontSize: 17, fontWeight: FontWeight.w700, height: 1.1)),
-            Text('Belgrano Norte',
-                style: TextStyle(
-                    fontSize: 17, fontWeight: FontWeight.w700, height: 1.1)),
+            Text(
+              'Tren',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                height: 1.1,
+              ),
+            ),
+            Text(
+              'Belgrano Norte',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                height: 1.1,
+              ),
+            ),
           ],
         ),
       ],
@@ -126,6 +139,7 @@ class _ShellState extends ConsumerState<_Shell> {
 
     return Scaffold(
       appBar: AppBar(
+        centerTitle: false,
         titleSpacing: 16,
         title: const _BrandTitle(),
       ),
@@ -136,15 +150,19 @@ class _ShellState extends ConsumerState<_Shell> {
               onDestinationSelected: (i) => setState(() => _tab = i),
               destinations: const [
                 NavigationDestination(
-                    icon: Icon(Icons.search), label: 'Buscar'),
+                  icon: Icon(Icons.search),
+                  label: 'Buscar',
+                ),
                 NavigationDestination(
-                    icon: Icon(Icons.notifications_outlined),
-                    selectedIcon: Icon(Icons.notifications),
-                    label: 'Alertas'),
+                  icon: Icon(Icons.notifications_outlined),
+                  selectedIcon: Icon(Icons.notifications),
+                  label: 'Alertas',
+                ),
                 NavigationDestination(
-                    icon: Icon(Icons.settings_outlined),
-                    selectedIcon: Icon(Icons.settings),
-                    label: 'Ajustes'),
+                  icon: Icon(Icons.settings_outlined),
+                  selectedIcon: Icon(Icons.settings),
+                  label: 'Ajustes',
+                ),
               ],
             )
           : null,

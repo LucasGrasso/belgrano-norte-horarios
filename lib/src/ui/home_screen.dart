@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,23 +14,57 @@ import 'brand.dart';
 
 /// Search: desde/hasta + optional date-time (defaults to "now"), results list.
 class HomeScreen extends ConsumerStatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, this.now = nowInArgentina});
+
+  final tz.TZDateTime Function() now;
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends ConsumerState<HomeScreen> {
+class _HomeScreenState extends ConsumerState<HomeScreen>
+    with WidgetsBindingObserver {
+  Timer? _refreshTimer;
   int _from = 0;
   int _to = kStations.length - 1;
 
-  /// Null = "now" (recomputed on every build so results stay fresh).
+  /// Null = "now"; refreshed periodically and immediately on app resume.
   tz.TZDateTime? _customWhen;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _startRefreshTimer();
     _restoreLastRoute();
+  }
+
+  void _refreshNow() {
+    if (mounted && _customWhen == null) setState(() {});
+  }
+
+  void _startRefreshTimer() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      _refreshNow();
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshNow();
+      _startRefreshTimer();
+    } else {
+      _refreshTimer?.cancel();
+    }
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   Future<void> _restoreLastRoute() async {
@@ -49,10 +85,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     await prefs.setInt('route.to', _to);
   }
 
-  tz.TZDateTime get _when => _customWhen ?? nowInArgentina();
+  tz.TZDateTime get _when => _customWhen ?? widget.now();
 
   Future<void> _pickWhen() async {
-    final now = nowInArgentina();
+    final now = widget.now();
     final date = await showDatePicker(
       context: context,
       initialDate: _when,

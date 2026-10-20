@@ -120,3 +120,19 @@ cuadro que corresponde al día de la semana.
 - Sin seguimiento en tiempo real (previsto a futuro).
 - iOS: la actualización mensual corre al abrir la app (BGTaskScheduler no
   está configurado; el chequeo on-launch cubre el caso).
+
+## Licencia
+
+Copyright (C) 2026 Lucas Grasso.
+
+El código original de este proyecto se distribuye bajo la **GNU General Public
+License, versión 3 únicamente** (`GPL-3.0-only`). Podés redistribuirlo y/o
+modificarlo bajo los términos de esa licencia. Se proporciona sin garantía;
+consultá el texto completo en [LICENSE](LICENSE).
+
+Las dependencias y los recursos de terceros conservan sus respectivas licencias.
+Esta licencia no concede derechos sobre los horarios, los PDF ni los datos de
+feriados obtenidos de fuentes externas. Los archivos de fuentes Segoe UI
+incluidos en `assets/fonts/` tampoco quedan cubiertos por la GPL del proyecto;
+sus derechos de redistribución deben resolverse o deben reemplazarse antes de
+una publicación pública.

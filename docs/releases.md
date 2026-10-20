@@ -1,11 +1,19 @@
 # Descargas sin Play Store ni App Store
 
-El workflow **Mobile release** genera dos archivos, sin credenciales de tiendas:
+El workflow **Mobile release** genera estos archivos, sin credenciales de tiendas:
 
 | Archivo | Cómo se instala |
 | --- | --- |
-| `belgrano-norte.apk` | Descargar e instalar en Android; autorizar al navegador o a la app de archivos si Android lo solicita |
+| `belgrano-norte-arm64-v8a.apk` | Recomendado para la mayoría de los teléfonos Android actuales; descarga más pequeña |
+| `belgrano-norte-armeabi-v7a.apk` | Teléfonos Android con procesador ARM de 32 bits |
+| `belgrano-norte-x86_64.apk` | Dispositivos Android con procesador x86 de 64 bits |
+| `belgrano-norte.apk` | Universal: compatible con las tres arquitecturas; usar si no sabés cuál elegir, aunque pesa más |
 | `belgrano-norte-unsigned.ipa` | **Sin firmar**. Cada usuario debe firmarlo e instalarlo con su propia cuenta y una herramienta de sideloading como AltStore Classic |
+
+Los APK se instalan directamente: autorizar al navegador o a la app de archivos
+si Android lo solicita. Todos usan la misma clave de firma y el mismo código de
+versión; se puede cambiar de variante en futuras actualizaciones si el teléfono
+es compatible. No hace falta desinstalar ni perder los datos.
 
 El IPA no se instala con sólo tocar un enlace. Con una cuenta gratuita, las
 apps instaladas mediante AltStore Classic vencen a los 7 días y deben renovarse;
@@ -25,7 +33,8 @@ no incluye una versión web.
 Una vez que exista un release, los nombres estables permiten compartir siempre
 estos enlaces:
 
-- [Último APK para Android](https://github.com/LucasGrasso/belgrano-norte-horarios/releases/latest/download/belgrano-norte.apk)
+- [Último APK ARM64: recomendado para la mayoría de los teléfonos](https://github.com/LucasGrasso/belgrano-norte-horarios/releases/latest/download/belgrano-norte-arm64-v8a.apk)
+- [Último APK universal para Android](https://github.com/LucasGrasso/belgrano-norte-horarios/releases/latest/download/belgrano-norte.apk)
 - [Último IPA sin firmar](https://github.com/LucasGrasso/belgrano-norte-horarios/releases/latest/download/belgrano-norte-unsigned.ipa)
 - [Todas las versiones](https://github.com/LucasGrasso/belgrano-norte-horarios/releases)
 
@@ -123,6 +132,29 @@ También se aceptan `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`,
 `flutter run` y los builds debug no requieren estos secretos.
 El build iOS corre en macOS 15/Xcode 26.3 con CocoaPods `--deployment`;
 si cambian dependencias nativas, actualizar `ios/Podfile.lock` desde un Mac.
+
+### APK más pequeños y análisis de tamaño
+
+El APK universal contiene el motor de Flutter y el código compilado para tres
+arquitecturas. Los APK específicos contienen sólo la arquitectura elegida.
+El workflow comprueba las arquitecturas de `libflutter.so` y `libapp.so`, y
+muestra el tamaño de cada descarga en el resumen del job de Android.
+
+Para generar localmente un APK ARM64:
+
+```bash
+flutter pub get --enforce-lockfile
+flutter build apk --release --no-pub --target-platform android-arm64
+```
+
+Para analizar su contenido, agregar `--analyze-size`. Se genera un informe que
+puede abrirse con la herramienta de tamaño de apps de Dart DevTools.
+
+Se compila cada destino explícitamente, en lugar de usar `--split-per-abi`,
+porque Flutter 3.44 agrega offsets al código de versión con esa opción. Así,
+el APK universal y las variantes mantienen el mismo `versionCode` y no impiden
+actualizaciones al cambiar de variante. El archivo ARM64 local queda en
+`build/app/outputs/flutter-apk/app-release.apk`.
 
 ## Referencias
 

@@ -62,13 +62,55 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get --enforce-lockfile
-      - name: Build directly installable APK
+      - name: Build universal and architecture-specific APKs
+        shell: bash
         run: |
-          flutter build apk --release --build-name="$BUILD_NAME" --build-number="$BUILD_NUMBER"
-      - name: Collect release assets
-        run: |
+          set -euo pipefail
           mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-release.apk dist/belgrano-norte.apk
+          # Explicit targets avoid --split-per-abi's versionCode offsets in
+          # Flutter 3.44. Every variant can update any compatible older APK.
+          for target in universal android-arm64 android-arm android-x64; do
+            case "$target" in
+              universal) platforms=android-arm,android-arm64,android-x64; filename=belgrano-norte.apk ;;
+              android-arm64) platforms=$target; filename=belgrano-norte-arm64-v8a.apk ;;
+              android-arm) platforms=$target; filename=belgrano-norte-armeabi-v7a.apk ;;
+              android-x64) platforms=$target; filename=belgrano-norte-x86_64.apk ;;
+            esac
+            flutter build apk --release --no-pub --target-platform="$platforms" \
+              --build-name="$BUILD_NAME" --build-number="$BUILD_NUMBER"
+            cp build/app/outputs/flutter-apk/app-release.apk "dist/$filename"
+          done
+      - name: Verify APK architectures and report download sizes
+        shell: bash
+        run: |
+          python3 - <<'PYTHON'
+          import os
+          from pathlib import Path
+          import zipfile
+
+          variants = {
+              'belgrano-norte.apk': {'armeabi-v7a', 'arm64-v8a', 'x86_64'},
+              'belgrano-norte-arm64-v8a.apk': {'arm64-v8a'},
+              'belgrano-norte-armeabi-v7a.apk': {'armeabi-v7a'},
+              'belgrano-norte-x86_64.apk': {'x86_64'},
+          }
+          rows = ['| APK | Download size (MiB) |', '| --- | ---: |']
+          for filename, expected in variants.items():
+              path = Path('dist') / filename
+              with zipfile.ZipFile(path) as apk:
+                  for library in ('libflutter.so', 'libapp.so'):
+                      actual = {
+                          name.split('/')[1] for name in apk.namelist()
+                          if name.startswith('lib/') and name.endswith('/' + library)
+                      }
+                      if actual != expected:
+                          raise SystemExit(f'{filename}: {library} architectures {actual}, expected {expected}')
+              rows.append(f'| `{filename}` | {path.stat().st_size / 1024**2:.2f} |')
+          summary = '\n'.join(rows) + '\n'
+          print(summary)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as output:
+              output.write(summary)
+          PYTHON
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-android

@@ -31,36 +31,35 @@ class Alert {
     int? minute,
     Set<int>? weekdays,
     bool? enabled,
-  }) =>
-      Alert(
-        id: id,
-        from: from ?? this.from,
-        to: to ?? this.to,
-        hour: hour ?? this.hour,
-        minute: minute ?? this.minute,
-        weekdays: weekdays ?? this.weekdays,
-        enabled: enabled ?? this.enabled,
-      );
+  }) => Alert(
+    id: id,
+    from: from ?? this.from,
+    to: to ?? this.to,
+    hour: hour ?? this.hour,
+    minute: minute ?? this.minute,
+    weekdays: weekdays ?? this.weekdays,
+    enabled: enabled ?? this.enabled,
+  );
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'from': from,
-        'to': to,
-        'hour': hour,
-        'minute': minute,
-        'weekdays': weekdays.toList()..sort(),
-        'enabled': enabled,
-      };
+    'id': id,
+    'from': from,
+    'to': to,
+    'hour': hour,
+    'minute': minute,
+    'weekdays': weekdays.toList()..sort(),
+    'enabled': enabled,
+  };
 
   static Alert fromJson(Map<String, dynamic> j) => Alert(
-        id: j['id'] as int,
-        from: j['from'] as int,
-        to: j['to'] as int,
-        hour: j['hour'] as int,
-        minute: j['minute'] as int,
-        weekdays: {...(j['weekdays'] as List).cast<int>()},
-        enabled: j['enabled'] as bool? ?? true,
-      );
+    id: j['id'] as int,
+    from: j['from'] as int,
+    to: j['to'] as int,
+    hour: j['hour'] as int,
+    minute: j['minute'] as int,
+    weekdays: {...(j['weekdays'] as List).cast<int>()},
+    enabled: j['enabled'] as bool? ?? true,
+  );
 }
 
 const _prefAlerts = 'alerts.v1';
@@ -68,6 +67,8 @@ const _prefAlerts = 'alerts.v1';
 class AlertStore {
   Future<List<Alert>> load() async {
     final prefs = await SharedPreferences.getInstance();
+    // Foreground and Workmanager isolates have independent preference caches.
+    await prefs.reload();
     final raw = prefs.getString(_prefAlerts);
     if (raw == null) return [];
     return [
@@ -79,7 +80,9 @@ class AlertStore {
   Future<void> save(List<Alert> alerts) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
-        _prefAlerts, jsonEncode([for (final a in alerts) a.toJson()]));
+      _prefAlerts,
+      jsonEncode([for (final a in alerts) a.toJson()]),
+    );
   }
 
   Future<int> nextId() async {

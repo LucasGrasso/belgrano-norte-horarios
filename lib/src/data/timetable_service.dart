@@ -13,11 +13,21 @@ const _prefLastFetchMonth = 'timetable.lastFetchMonth';
 
 /// Fetch + parse + persist. Any failure leaves the stored timetable intact.
 class TimetableService {
-  TimetableService(this._store, {http.Client? client})
-      : _client = client ?? http.Client();
+  TimetableService(
+    this._store, {
+    http.Client? client,
+    this.requestTimeout = const Duration(seconds: 60),
+  }) : _client = client ?? http.Client(),
+       _ownsClient = client == null;
 
   final TimetableStore _store;
   final http.Client _client;
+  final bool _ownsClient;
+  final Duration requestTimeout;
+
+  void close() {
+    if (_ownsClient) _client.close();
+  }
 
   Future<Timetable?> loadStored() => _store.load();
 
@@ -26,12 +36,14 @@ class TimetableService {
   Future<Timetable> fetchAndStore() async {
     final response = await _client
         .get(Uri.parse(kTimetablePdfUrl))
-        .timeout(const Duration(seconds: 60));
+        .timeout(requestTimeout);
     if (response.statusCode != 200) {
       throw Exception('HTTP ${response.statusCode} downloading timetable');
     }
-    final timetable =
-        parseTimetablePdf(response.bodyBytes, fetchedAt: DateTime.now());
+    final timetable = parseTimetablePdf(
+      response.bodyBytes,
+      fetchedAt: DateTime.now(),
+    );
     await _store.save(timetable);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefLastFetchMonth, currentArgentinaMonth());
@@ -47,6 +59,7 @@ class TimetableService {
   /// True when we have never fetched in the current Argentina month.
   static Future<bool> isMonthlyUpdateDue() async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     return prefs.getString(_prefLastFetchMonth) != currentArgentinaMonth();
   }
 

@@ -18,12 +18,13 @@ lo parsea en el dispositivo y después funciona sin conexión.
   cruzan la medianoche y servicios cortos (p. ej. trenes que terminan en
   Boulogne). Los feriados aplican el cuadro de domingos automáticamente.
 - **Alertas**: notificaciones recurrentes por día de semana y hora que
-  muestran los próximos 3 trenes del recorrido elegido. Usa alarmas exactas si
+  muestran los próximos 3 trenes del recorrido elegido, calculados para cada
+  fecha con su calendario de feriados. Usa alarmas exactas si
   el usuario lo permite; degrada a inexactas si no.
 - **Actualización mensual automática**: al comenzar cada mes (hora argentina)
-  se descarga de nuevo el PDF oficial (WorkManager en Android + chequeo al
-  abrir la app). Si la descarga o el parseo fallan, se conservan los horarios
-  anteriores y se reintenta.
+  se descarga de nuevo el PDF oficial (WorkManager en Android y BGTaskScheduler
+  en iOS, más chequeo al abrir o retomar la app). Si la descarga o el parseo
+  fallan, se conservan los horarios anteriores y se reintenta.
 
 ## Arquitectura
 
@@ -104,22 +105,47 @@ flutter analyze
 
 ## Feriados
 
-La app descarga una vez por año el calendario oficial de feriados
+La app descarga el calendario oficial de feriados y lo vuelve a consultar
+cada **14 días desde la última descarga exitosa**
 (`https://www.argentina.gob.ar/sites/default/files/holidays-<año>-es.json`)
-y lo guarda localmente. Los feriados inamovibles, trasladables y turísticos
+y lo guarda localmente. También obtiene los años que cubren las búsquedas y
+alertas de los próximos 60 días, incluso antes de diciembre. Si la consulta
+falla, conserva el calendario anterior y reintenta en el siguiente chequeo.
+Los feriados inamovibles, trasladables y turísticos
 aplican el cuadro de domingos automáticamente en la búsqueda y en las
 alertas; los días "no laborables" mantienen el horario normal. Si el
 calendario del año consultado todavía no se descargó, la búsqueda usa el
 cuadro que corresponde al día de la semana.
 
+## Actualizaciones y alertas en segundo plano
+
+Android y iOS solicitan un chequeo periódico cada 12 horas. El PDF se vuelve a
+descargar cuando cambia el mes; los feriados se refrescan cuando cumplen 14
+días. Al abrir o retomar la app también se comprueban ambas actualizaciones.
+
+Las alertas se programan para **fechas concretas**, hasta 60 días hacia adelante,
+con el contenido de cada fecha: un jueves feriado no reutiliza sus horarios el
+jueves siguiente. La agenda se renueva al editar alertas, al abrir o retomar la
+app y durante los chequeos en segundo plano, aunque no haya un PDF nuevo.
+
+Se respetan los límites de notificaciones pendientes: hasta 63 avisos de trenes
+más un recordatorio de renovación en iOS; hasta 499 más un recordatorio en
+Android. Se priorizan los avisos más próximos entre todas las alertas. Si el
+sistema no pudo renovar la agenda, el último aviso pide abrir la app para
+continuar recibiendo alertas. Las fechas cuyo calendario no está disponible
+se identifican como «Feriados sin verificar» en la notificación.
+
+En iOS está configurado `BGTaskScheduler` con `BGAppRefreshTask`. **iOS decide
+cuándo ejecutarlo** según el uso de la app, la batería y los permisos de
+actualización en segundo plano. Forzar el cierre o desactivar esa función
+puede impedir las renovaciones; abrir la app permite realizarlas. Android
+también puede diferir trabajo por ahorro de batería. Ninguna plataforma
+garantiza el chequeo exactamente cada 12 horas ni en el instante en que vence
+el calendario. Los avisos ya programados funcionan sin conexión.
+
 ## Limitaciones conocidas / futuro
 
-- Las alertas semanales calculan su contenido para la próxima ocurrencia
-  (incluyendo feriados); las repeticiones siguientes reutilizan ese contenido
-  hasta el próximo re-agendado (al abrir la app o actualizar horarios).
 - Sin seguimiento en tiempo real (previsto a futuro).
-- iOS: la actualización mensual corre al abrir la app (BGTaskScheduler no
-  está configurado; el chequeo on-launch cubre el caso).
 
 ## Licencia
 

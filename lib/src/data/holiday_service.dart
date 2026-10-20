@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import 'package:timezone/timezone.dart' as tz;
 
 import '../domain/service_calendar.dart';
 import 'atomic_file.dart';
@@ -40,88 +41,170 @@ class HolidayCalendar {
 /// Parses the schema.org ItemList payload of the official feed into feriado
 /// date keys. Throws [FormatException] on unexpected shape.
 Set<String> parseHolidaysJson(String source) {
-  final root = jsonDecode(source) as Map<String, dynamic>;
-  final items =
-      (root['mainEntity'] as Map<String, dynamic>)['itemListElement'] as List;
+  final root = jsonDecode(source);
+  if (root is! Map ||
+      root['mainEntity'] is! Map ||
+      root['mainEntity']['itemListElement'] is! List) {
+    throw const FormatException('invalid holiday feed');
+  }
+  final items = root['mainEntity']['itemListElement'] as List;
   final dates = <String>{};
   for (final e in items) {
-    final item = (e as Map<String, dynamic>)['item'] as Map<String, dynamic>;
-    final tipo = ((item['additionalProperty']
-            as Map<String, dynamic>)['value'] as String)
-        .toLowerCase();
-    final date = item['startDate'] as String;
+    if (e is! Map || e['item'] is! Map) {
+      throw const FormatException('invalid holiday item');
+    }
+    final item = e['item'] as Map;
+    final property = item['additionalProperty'];
+    final date = item['startDate'];
+    if (property is! Map ||
+        property['value'] is! String ||
+        date is! String ||
+        !_validDate(date)) {
+      throw const FormatException('invalid holiday date or type');
+    }
+    final tipo = (property['value'] as String).toLowerCase();
     if (_holidayTypes.contains(tipo)) dates.add(date);
   }
   if (dates.isEmpty) throw const FormatException('no holidays in feed');
   return dates;
 }
 
-/// Downloads and persists the yearly feriado feeds. Stored shape:
-/// `{"2026": ["2026-01-01", ...]}` in the app support directory.
+/// Downloads holiday feeds, keeping each year's last successful fetch time.
+/// Legacy year-to-list caches remain readable and are refreshed on first use.
 class HolidayService {
-  HolidayService(this._file, {http.Client? client})
-      : _client = client ?? http.Client();
+  HolidayService(
+    this._file, {
+    http.Client? client,
+    DateTime Function()? now,
+    this.requestTimeout = const Duration(seconds: 30),
+  }) : _client = client ?? http.Client(),
+       _ownsClient = client == null,
+       _now = now ?? nowInArgentina;
 
+  static const refreshInterval = Duration(days: 14);
   final File _file;
   final http.Client _client;
+  final bool _ownsClient;
+  final DateTime Function() _now;
+  final Duration requestTimeout;
 
-  static Future<HolidayService> open({http.Client? client}) async {
+  static Future<HolidayService> open({
+    http.Client? client,
+    Duration requestTimeout = const Duration(seconds: 30),
+  }) async {
     final dir = await getApplicationSupportDirectory();
     return HolidayService(
-        File('${dir.path}${Platform.pathSeparator}holidays.json'),
-        client: client);
+      File('${dir.path}${Platform.pathSeparator}holidays.json'),
+      client: client,
+      requestTimeout: requestTimeout,
+    );
   }
 
-  Future<HolidayCalendar> load() async {
+  void close() {
+    if (_ownsClient) _client.close();
+  }
+
+  Future<Map<String, dynamic>> _readYears() async {
     try {
-      if (!await _file.exists()) return const HolidayCalendar.empty();
-      final raw = jsonDecode(await _file.readAsString()) as Map<String, dynamic>;
-      return HolidayCalendar(
-        loadedYears: raw.keys.map(int.parse).toSet(),
-        dates: {
-          for (final v in raw.values) ...(v as List).cast<String>(),
-        },
-      );
+      final raw = jsonDecode(await _file.readAsString());
+      if (raw is! Map<String, dynamic>) return {};
+      final years = raw['version'] == 2 ? raw['years'] : raw;
+      if (years is! Map<String, dynamic>) return {};
+      return {
+        for (final entry in years.entries)
+          if (int.tryParse(entry.key) != null)
+            entry.key: entry.value is List
+                ? {'dates': entry.value, 'fetchedAt': null}
+                : entry.value,
+      };
     } on Exception {
-      return const HolidayCalendar.empty();
+      return {};
     }
   }
 
-  /// Fetches the current Argentina year (and the next one from December,
-  /// so New Year queries keep working) unless already stored. Network or
-  /// format failures leave the stored data untouched; the year stays
-  /// missing and is retried on the next call.
+  HolidayCalendar _calendar(Map<String, dynamic> years) {
+    final loaded = <int>{};
+    final dates = <String>{};
+    for (final entry in years.entries) {
+      final value = entry.value;
+      if (value is! Map || value['dates'] is! List) continue;
+      final entries = value['dates'] as List;
+      if (entries.any((d) => d is! String || !_validDate(d))) continue;
+      // Yearly feeds can include the following New Year's Day. Coverage and
+      // freshness still belong to the requested year, so retain only its dates.
+      final yearDates = entries
+          .cast<String>()
+          .where((d) => d.startsWith('${entry.key}-'))
+          .toSet();
+      if (yearDates.isEmpty) continue;
+      loaded.add(int.parse(entry.key));
+      dates.addAll(yearDates);
+    }
+    return HolidayCalendar(loadedYears: loaded, dates: dates);
+  }
+
+  Future<HolidayCalendar> load() async => _calendar(await _readYears());
+
+  /// Refreshes stale/missing years every 14 days, including all service days
+  /// used by searches and dated alerts (yesterday through 61 days ahead).
+  /// A failure keeps both the last good dates and their timestamp unchanged.
   Future<HolidayCalendar> ensureCurrentYears() async {
-    final now = nowInArgentina();
-    final wanted = {now.year, if (now.month == 12) now.year + 1};
-    var calendar = await load();
-    for (final year in wanted.difference(calendar.loadedYears)) {
-      try {
-        final response = await _client
-            .get(Uri.parse(holidaysUrl(year)))
-            .timeout(const Duration(seconds: 30));
-        if (response.statusCode != 200) continue;
-        final dates = parseHolidaysJson(utf8.decode(response.bodyBytes));
-        await _save(year, dates);
-        calendar = await load();
-      } on Exception {
-        // keep going; retried on next launch/periodic check
+    final now = tz.TZDateTime.from(_now(), argentina);
+    final firstYear = now.subtract(const Duration(days: 1)).year;
+    final lastYear = now
+        .add(const Duration(days: kScheduleHorizonDays + 1))
+        .year;
+    final years = await _readYears();
+    final calendar = _calendar(years);
+    final due = <int>[];
+    for (var year = firstYear; year <= lastYear; year++) {
+      final entry = years['$year'];
+      final fetchedAt = entry is Map && entry['fetchedAt'] is String
+          ? DateTime.tryParse(entry['fetchedAt'] as String)
+          : null;
+      final age = fetchedAt == null ? null : now.toUtc().difference(fetchedAt);
+      if (!calendar.loadedYears.contains(year) ||
+          age == null ||
+          age.isNegative ||
+          age >= refreshInterval) {
+        due.add(year);
       }
+    }
+    // Fetch years in parallel to stay within iOS's background execution budget.
+    final updates = await Future.wait<MapEntry<String, Map<String, dynamic>>?>(
+      due.map((year) async {
+        try {
+          final response = await _client
+              .get(Uri.parse(holidaysUrl(year)))
+              .timeout(requestTimeout);
+          if (response.statusCode != 200) return null;
+          final dates = parseHolidaysJson(
+            utf8.decode(response.bodyBytes),
+          ).where((date) => date.startsWith('$year-')).toSet();
+          if (dates.isEmpty) return null;
+          return MapEntry('$year', {
+            'dates': dates.toList()..sort(),
+            'fetchedAt': now.toUtc().toIso8601String(),
+          });
+        } on Exception {
+          return null;
+        }
+      }),
+    );
+    final valid = updates.nonNulls.toList();
+    if (valid.isNotEmpty) {
+      // Merge into the latest file so another refreshed year is preserved.
+      final latest = await _readYears();
+      latest.addEntries(valid);
+      await atomicWrite(_file, jsonEncode({'version': 2, 'years': latest}));
+      return _calendar(latest);
     }
     return calendar;
   }
-
-  Future<void> _save(int year, Set<String> dates) async {
-    Map<String, dynamic> raw = {};
-    if (await _file.exists()) {
-      try {
-        raw = jsonDecode(await _file.readAsString()) as Map<String, dynamic>;
-      } on Exception {
-        raw = {};
-      }
-    }
-    raw['$year'] = dates.toList()..sort();
-    await atomicWrite(_file, jsonEncode(raw));
-  }
 }
 
+bool _validDate(String value) {
+  if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value)) return false;
+  final date = DateTime.tryParse(value);
+  return date != null && HolidayCalendar._key(date) == value;
+}

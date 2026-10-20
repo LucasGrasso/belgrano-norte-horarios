@@ -25,8 +25,9 @@ const freshTimetable = Timetable(
 
 class _Service extends Fake implements TimetableService {
   final download = Completer<Timetable>();
+  Timetable stored = oldTimetable;
   @override
-  Future<Timetable?> loadStored() async => oldTimetable;
+  Future<Timetable?> loadStored() async => stored;
   @override
   Future<Timetable> fetchAndStore() => download.future;
   @override
@@ -105,6 +106,17 @@ void main() {
     () async {
       await container.read(timetableProvider.future);
       await container.read(timetableProvider.notifier).monthlyCheck();
+      expect(scheduler.schedules, 1);
+    },
+  );
+
+  test(
+    'resume adopts a timetable already refreshed by the background isolate',
+    () async {
+      await container.read(timetableProvider.future);
+      service.stored = freshTimetable;
+      await container.read(timetableProvider.notifier).monthlyCheck();
+      expect(container.read(timetableProvider).value, same(freshTimetable));
       expect(scheduler.schedules, 1);
     },
   );

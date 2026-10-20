@@ -28,36 +28,26 @@ introducing a backend or another state framework is unnecessary for this scope.
 
 ## Highest-priority remaining work
 
-### 1. Make notification content correct for every occurrence
+### 1. Dated notifications and background maintenance — implemented
 
-`NotificationScheduler._scheduleWeekly` computes the next three trains once
-and sets `DateTimeComponents.dayOfWeekAndTime`. Every later weekly occurrence
-reuses that text. A holiday Monday and the next normal Monday can therefore
-show different timetables but identical notification content. Opening the app
-now refreshes the schedule, but a user who does not reopen it can still receive
-incorrect times. Android's periodic worker also only reschedules after a
-monthly download.
+Weekly repeating notification bodies were replaced with a rolling queue of
+one-off notifications. Each occurrence uses its own service-day holiday
+calendar. The queue is replenished on launch/resume, alert edits and background
+work on Android and iOS, even when the monthly PDF is unchanged. It respects
+platform capacity across all alerts and reserves a final renewal reminder.
+Unknown holiday coverage is disclosed in notification content. iOS now registers
+its BGAppRefreshTask handler and background plugin registrant before launch ends.
+OS execution remains discretionary; device checks are described in
+[background validation](background-validation.md).
 
-Use a rolling queue of **dated, one-off notifications**, calculate holidays for
-each service date and replenish on launch/resume and Android periodic work.
-Respect iOS's pending-notification capacity across all alerts, show the scheduled
-coverage horizon, and define what happens when the user does not reopen the app
-before that horizon. Avoid claiming background work will run at an exact time
-on iOS. Add tests for holiday → normal week, New Year, timezone changes, reboot,
-permission denial and many enabled alerts.
+### 2. Holiday refresh and year coverage — implemented
 
-### 2. Fetch holiday coverage for the actual query range
-
-`HolidayService.ensureCurrentYears` fetches next year only in December, while
-the date picker accepts dates 60 days ahead. In November, a January query can
-silently miss a holiday. Cached years also never refresh, so later official
-calendar changes are missed. The UI silently treats unknown holiday data as
-ordinary weekday service.
-
-Add `ensureYears(Set<int>)`, resolve every year touched by a search and its
-previous service day, and refresh cached feeds with a sensible TTL/conditional
-request. Display “Feriados sin verificar” when coverage is unknown. Test late
-November → January, an offline unknown year and malformed feed recovery.
+Each year's successful-fetch timestamp persists with the cache. Feeds refresh
+after 14 days; failed or malformed responses retain the old data and timestamp
+and remain due for retry. Legacy caches migrate automatically. Coverage extends
+from yesterday through 61 days ahead to include overnight services and January
+queries before December. Next-year feed failures do not force re-fetching a
+fresh current-year feed.
 
 ### 3. Separate downloading from notification side effects
 

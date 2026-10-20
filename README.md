@@ -87,6 +87,10 @@ app funciona sin conexión.
 
 ## Desarrollo
 
+CI y generación de APK/AAB e IPA firmados: [guía de releases](docs/releases.md).
+Análisis del repositorio y próximos cambios recomendados:
+[revisión técnica y de UI](docs/repository-review.md).
+
 ```
 flutter test      # incluye tests del parser contra test/fixtures/*.pdf
 flutter analyze

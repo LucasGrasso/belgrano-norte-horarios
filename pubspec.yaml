@@ -5,6 +5,8 @@ version: 0.1.0+1
 
 environment:
   sdk: ^3.12.2
+  # CI reads this exact version; matches the SDK in .metadata.
+  flutter: 3.44.6
 
 dependencies:
   flutter:
@@ -49,3 +51,4 @@ flutter_launcher_icons:
   adaptive_icon_foreground: assets/icon/app_icon_fg.png
   remove_alpha_ios: true
   background_color_ios: "#FFFFFF"
+

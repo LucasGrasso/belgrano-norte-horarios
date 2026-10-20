@@ -1,0 +1,105 @@
+name: Mobile release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platforms to build (select an existing version tag above)
+        type: choice
+        options: [both, android, ios]
+        default: both
+      publish:
+        description: Publish a GitHub Release after successful builds
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      name: ${{ steps.version.outputs.name }}
+      number: ${{ steps.version.outputs.number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require a version tag matching pubspec.yaml
+        id: version
+        run: python3 tool/release_version.py
+
+  checks:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+
+  android:
+    needs: [version, checks]
+    if: github.event_name == 'push' || inputs.platform != 'ios'
+    uses: ./.github/workflows/release-android.yml
+    with:
+      version: ${{ needs.version.outputs.name }}
+      build-number: ${{ needs.version.outputs.number }}
+    secrets:
+      keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      keystore-password: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+      key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+  ios:
+    needs: [version, checks]
+    if: github.event_name == 'push' || inputs.platform != 'android'
+    uses: ./.github/workflows/release-ios.yml
+    with:
+      version: ${{ needs.version.outputs.name }}
+      build-number: ${{ needs.version.outputs.number }}
+      export-method: ${{ vars.IOS_EXPORT_METHOD || 'app-store-connect' }}
+    secrets:
+      certificate-base64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+      certificate-password: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+      profile-base64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+
+  publish:
+    needs: [version, checks, android, ios]
+    if: >-
+      always() && !cancelled() &&
+      (github.event_name == 'push' || inputs.publish) &&
+      needs.version.result == 'success' && needs.checks.result == 'success' &&
+      (needs.android.result == 'success' || needs.android.result == 'skipped') &&
+      (needs.ios.result == 'success' || needs.ios.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - name: Publish complete release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Refuse to replace an already published release on a rerun.
+          if gh release view "$RELEASE_TAG" --json isDraft > release.json; then
+            python3 -c 'import json; assert json.load(open("release.json"))["isDraft"], "Release already published; create a new version instead"'
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft \
+              --title "$RELEASE_TAG" --generate-notes
+          fi
+          (cd dist && sha256sum ./* > SHA256SUMS.txt)
+          gh release upload "$RELEASE_TAG" dist/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false

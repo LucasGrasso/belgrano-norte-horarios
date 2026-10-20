@@ -47,7 +47,9 @@ class TimetableController extends AsyncNotifier<Timetable?> {
   Future<void> download() async {
     final service = await ref.read(timetableServiceProvider.future);
     final previous = state.value;
-    state = const AsyncLoading();
+    // Keep existing data visible during a refresh. Unmounting the shell here
+    // discards the current route, custom date and Settings progress state.
+    if (previous == null) state = const AsyncLoading();
     try {
       final fresh = await service.fetchAndStore();
       state = AsyncData(fresh);
@@ -60,20 +62,22 @@ class TimetableController extends AsyncNotifier<Timetable?> {
 
   /// Silent check on app launch: refetch if the Argentina month changed.
   Future<void> monthlyCheck() async {
+    final current = await future;
+    if (current == null) return; // first download remains an explicit action
     final service = await ref.read(timetableServiceProvider.future);
     final updated = await service.updateIfNewMonth();
     if (updated != null) {
       state = AsyncData(updated);
-      await _rescheduleAlerts(updated);
     }
+    await _rescheduleAlerts(updated ?? current);
   }
 
   Future<void> _rescheduleAlerts(Timetable timetable) async {
     final scheduler = await ref.read(notificationSchedulerProvider.future);
     final alerts = await ref.read(alertsProvider.future);
-    final holidays = ref.read(holidaysProvider).value;
+    final holidays = await ref.read(holidaysProvider.future);
     await scheduler.rescheduleAll(alerts, timetable,
-        isHoliday: holidays?.isHoliday);
+        isHoliday: holidays.isHoliday);
   }
 }
 
@@ -119,3 +123,4 @@ class AlertsController extends AsyncNotifier<List<Alert>> {
 
 final alertsProvider =
     AsyncNotifierProvider<AlertsController, List<Alert>>(AlertsController.new);
+

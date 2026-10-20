@@ -33,7 +33,11 @@ class NotificationScheduler {
     await plugin.initialize(
       settings: const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-        iOS: DarwinInitializationSettings(),
+        iOS: DarwinInitializationSettings(
+          requestAlertPermission: false,
+          requestBadgePermission: false,
+          requestSoundPermission: false,
+        ),
       ),
     );
     return NotificationScheduler(plugin);
@@ -112,7 +116,10 @@ class NotificationScheduler {
       title: 'Próximos trenes $route',
       body: body,
       scheduledDate: fireAt,
-      notificationDetails: const NotificationDetails(android: _channel),
+      notificationDetails: const NotificationDetails(
+        android: _channel,
+        iOS: DarwinNotificationDetails(),
+      ),
       androidScheduleMode: mode,
       matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
     );
@@ -133,3 +140,4 @@ class NotificationScheduler {
   static String _hhmm(DateTime t) =>
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 }
+

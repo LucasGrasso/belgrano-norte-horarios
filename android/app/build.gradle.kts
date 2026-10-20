@@ -1,8 +1,20 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+// CI uses environment variables; local release builds can use key.properties.
+val keystoreProperties = Properties().apply {
+    val propertiesFile = rootProject.file("key.properties")
+    if (propertiesFile.exists()) propertiesFile.inputStream().use { load(it) }
+}
+fun signingValue(environment: String, property: String): String? =
+    System.getenv(environment) ?: keystoreProperties.getProperty(property)
+
+val releaseStoreFile = signingValue("ANDROID_KEYSTORE_PATH", "storeFile")
 
 android {
     namespace = "ar.com.lucasgrasso.tren_bn_horarios"
@@ -27,11 +39,21 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            if (releaseStoreFile != null) {
+                storeFile = rootProject.file(releaseStoreFile)
+                storePassword = signingValue("ANDROID_KEYSTORE_PASSWORD", "storePassword")
+                keyAlias = signingValue("ANDROID_KEY_ALIAS", "keyAlias")
+                keyPassword = signingValue("ANDROID_KEY_PASSWORD", "keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Never ship a release signed with a throwaway debug key.
+            signingConfig = signingConfigs.getByName("release")
             // Keep rules for classes the plugins create via reflection
             // (appended to Flutter's defaults; R8 strips them otherwise).
             proguardFile("proguard-rules.pro")
@@ -52,3 +74,4 @@ dependencies {
 flutter {
     source = "../.."
 }
+

@@ -1,8 +1,8 @@
 # Repository review and upgrade plan
 
 Reviewed against `main` commit `b310abfb876bd4106524cb2e746de538bafac69b`.
-This is a source and automated-test review; device notification delivery and
-signed store builds still need Android/iPhone validation with real credentials.
+This is a source and automated-test review; native release builds, sideloaded
+installation and notification delivery still need Android/iPhone validation.
 
 ## What the app does well
 
@@ -24,7 +24,7 @@ introducing a backend or another state framework is unnecessary for this scope.
 | App-launch alert rescheduling happened only when a new month required a timetable download; holiday fetch raced it | Launch/resume loads the timetable, refreshes holidays and then reschedules alerts, including when no download is due | `ui/app.dart`, `state/providers.dart` |
 | iOS initialized with permission requests enabled despite the intended contextual permission flow; scheduled details only specified Android | Initialization defers permission requests; scheduled notifications include Darwin details | `notifications/notification_scheduler.dart` |
 | Saved route IDs were trusted without bounds checks | Invalid preferences fall back to the default route | `ui/home_screen.dart` |
-| Android release used a debug signing key; no CI/release automation | Release uses an explicit keystore; CI and signed Android/iOS build workflows are included | `android/app/build.gradle.kts`, `.github/workflows/` |
+| Android release used a debug signing key; no CI/release automation | Release uses an explicit free Android signing key; CI and directly downloadable APK/unsigned IPA workflows are included | `android/app/build.gradle.kts`, `.github/workflows/` |
 
 ## Highest-priority remaining work
 
@@ -91,7 +91,7 @@ The original tests cover the domain and PDF fixture well, but do not exercise
 failed downloads, cache corruption/schema changes, concurrent alert edits,
 platform permissions or actual notification delivery. This change adds cache
 replacement/concurrent-write tests, refresh-state tests and tab-state/invalid
-preference widget regressions, plus release metadata/profile validation tests.
+preference widget regressions, plus release metadata validation tests.
 
 Next add injected clocks, filesystems and notification adapters. Verify the
 complete offline/reconnect flow and rescheduling on physical Android/iOS devices.
@@ -118,8 +118,11 @@ status unambiguous.
 
 ## Release follow-through
 
-See [the release setup guide](releases.md). Store uploads, signing secrets,
-Apple membership and real-device checks are still required before shipping.
+See [the release setup guide](releases.md). Android needs a stable, locally
+generated signing key; no store account is required. The unsigned iOS download
+requires each user to sign/install it with their own account and a sideloading
+tool. Neither APK distribution nor unsigned IPA generation requires store
+credentials. Real-device installation checks are still required.
 Review redistribution rights for the bundled Segoe UI fonts and the Syncfusion
 license before public distribution; no licensing determination was made here.
 Configure protected tags/review rules and automatic updates for the pinned

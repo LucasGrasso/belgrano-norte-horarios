@@ -1,4 +1,4 @@
-name: Build signed iOS release
+name: Build unsigned iOS IPA for self-signing
 
 on:
   workflow_call:
@@ -8,16 +8,6 @@ on:
         required: true
       build-number:
         type: string
-        required: true
-      export-method:
-        type: string
-        default: app-store-connect
-    secrets:
-      certificate-base64:
-        required: true
-      certificate-password:
-        required: true
-      profile-base64:
         required: true
 
 permissions:
@@ -36,56 +26,37 @@ jobs:
           persist-credentials: false
       - name: Select Xcode
         run: |
-          echo "KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db" >> "$GITHUB_ENV"
-          echo "PROFILE_PATH=$RUNNER_TEMP/release.mobileprovision" >> "$GITHUB_ENV"
           sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
           xcodebuild -version
-      - name: Install certificate and provisioning profile
-        env:
-          CERTIFICATE_BASE64: ${{ secrets.certificate-base64 }}
-          CERTIFICATE_PASSWORD: ${{ secrets.certificate-password }}
-          PROFILE_BASE64: ${{ secrets.profile-base64 }}
-          EXPORT_METHOD: ${{ inputs.export-method }}
-        run: bash tool/install_ios_signing.sh
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version-file: pubspec.yaml
           channel: stable
           cache: true
-      - name: Configure Flutter and resolve locked dependencies
+      - name: Configure Flutter without Apple signing credentials
         run: |
           flutter config --no-enable-swift-package-manager
           flutter pub get --enforce-lockfile
-          flutter build ios --release --config-only --build-name="$BUILD_NAME" --build-number="$BUILD_NUMBER"
+          flutter build ios --release --config-only --no-codesign --no-pub \
+            --build-name="$BUILD_NAME" --build-number="$BUILD_NUMBER"
       - name: Install locked CocoaPods dependencies
         working-directory: ios
         run: pod install --deployment
-      - name: Archive and export signed IPA
+      - name: Build unsigned app
         run: |
-          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner \
-            -configuration Release -destination 'generic/platform=iOS' \
-            -archivePath build/ios/archive/Runner.xcarchive archive \
-            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY='Apple Distribution' \
-            DEVELOPMENT_TEAM="$IOS_TEAM_ID" \
-            PROVISIONING_PROFILE_SPECIFIER="$IOS_PROFILE_UUID" \
-            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH"
-          xcodebuild -exportArchive -archivePath build/ios/archive/Runner.xcarchive \
-            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath build/ios/ipa
-          mkdir -p dist
-          cp build/ios/ipa/*.ipa "dist/belgrano-norte-$BUILD_NAME-ios.ipa"
+          flutter build ios --release --no-codesign --no-pub \
+            --build-name="$BUILD_NAME" --build-number="$BUILD_NUMBER"
+      - name: Package IPA for users to sign themselves
+        run: |
+          test -f build/ios/iphoneos/Runner.app/Info.plist
+          mkdir -p build/ios/package/Payload dist
+          cp -R build/ios/iphoneos/Runner.app build/ios/package/Payload/
+          archive="$PWD/dist/belgrano-norte-unsigned.ipa"
+          (cd build/ios/package && zip -qry "$archive" Payload)
+          unzip -t "$archive"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-ios
           path: dist/*.ipa
           if-no-files-found: error
           retention-days: 14
-      - name: Remove signing material
-        if: always()
-        run: |
-          if [[ -f "$RUNNER_TEMP/app-signing.keychain-db" ]]; then
-            security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db"
-          fi
-          if [[ -n "${IOS_PROFILE_UUID:-}" ]]; then
-            rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$IOS_PROFILE_UUID.mobileprovision"
-          fi
-          rm -f "$RUNNER_TEMP/release.mobileprovision" "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/profile.plist" "$RUNNER_TEMP/ExportOptions.plist"

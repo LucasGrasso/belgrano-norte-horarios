@@ -61,11 +61,6 @@ jobs:
     with:
       version: ${{ needs.version.outputs.name }}
       build-number: ${{ needs.version.outputs.number }}
-      export-method: ${{ vars.IOS_EXPORT_METHOD || 'app-store-connect' }}
-    secrets:
-      certificate-base64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
-      certificate-password: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
-      profile-base64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
 
   publish:
     needs: [version, checks, android, ios]
@@ -73,8 +68,8 @@ jobs:
       always() && !cancelled() &&
       (github.event_name == 'push' || inputs.publish) &&
       needs.version.result == 'success' && needs.checks.result == 'success' &&
-      (needs.android.result == 'success' || needs.android.result == 'skipped') &&
-      (needs.ios.result == 'success' || needs.ios.result == 'skipped')
+      (needs.android.result == 'success' ||
+      (needs.android.result == 'skipped' && needs.ios.result == 'success'))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -85,7 +80,7 @@ jobs:
           pattern: release-*
           merge-multiple: true
           path: dist
-      - name: Publish complete release assets
+      - name: Publish available downloads
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -93,13 +88,36 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Refuse to replace an already published release on a rerun.
+          # Publish successful platforms even if the other build failed.
+          # Stable filenames provide /releases/latest/download/<filename> links.
+          for asset in dist/*; do
+            filename="$(basename "$asset")"
+            (cd dist && sha256sum "$filename" > "$filename.sha256")
+          done
+          upload_options=()
           if gh release view "$RELEASE_TAG" --json isDraft > release.json; then
-            python3 -c 'import json; assert json.load(open("release.json"))["isDraft"], "Release already published; create a new version instead"'
+            if python3 -c 'import json; raise SystemExit(not json.load(open("release.json"))["isDraft"])'; then
+              upload_options+=(--clobber)
+            fi
           else
+            if [[ "${{ needs.android.result }}" != 'success' ]]; then
+              echo '::error::Publish Android first so the latest release always has an APK.'
+              exit 1
+            fi
             gh release create "$RELEASE_TAG" --verify-tag --draft \
-              --title "$RELEASE_TAG" --generate-notes
+              --title "$RELEASE_TAG" --generate-notes --notes-file <(cat <<'NOTES'
+          Android: download belgrano-norte.apk and allow installation from your browser/files app when Android asks. No Play Store account is needed.
+
+          iPhone/iPad: belgrano-norte-unsigned.ipa is UNSIGNED. Downloading it does not install the app. Use a self-signing tool such as AltStore Classic with your own Apple ID; free-account installations need refreshing every 7 days. This is not an App Store or TestFlight build.
+
+          Installation and updates: https://github.com/LucasGrasso/belgrano-norte-horarios/blob/main/docs/releases.md
+
+          Each download has a matching .sha256 checksum. If a platform is missing, its build has not completed successfully; check Actions.
+          NOTES
+              )
+            upload_options+=(--clobber)
           fi
-          (cd dist && sha256sum ./* > SHA256SUMS.txt)
-          gh release upload "$RELEASE_TAG" dist/* --clobber
+          # Published assets are immutable. A later single-platform run may
+          # add missing files, but cannot overwrite an existing download.
+          gh release upload "$RELEASE_TAG" dist/* "${upload_options[@]}"
           gh release edit "$RELEASE_TAG" --draft=false

@@ -1,112 +1,132 @@
-# Releases de Android e iOS
+# Descargas sin Play Store ni App Store
 
-Los workflows generan un APK instalable, un AAB para Google Play y un IPA
-firmado. Al subir un tag `vX.Y.Z`, primero corren el analizador y los tests;
-después compilan ambas plataformas en paralelo y publican los archivos y sus
-SHA-256 en un GitHub Release. Si una plataforma falla, no se publica el release;
-los artefactos de la otra quedan disponibles en Actions durante 14 días.
+El workflow **Mobile release** genera dos archivos, sin credenciales de tiendas:
 
-La publicación en Google Play, TestFlight o App Store se realiza por separado.
-Un IPA de App Store no se puede instalar directamente desde GitHub en cualquier
-iPhone: debe pasar por App Store Connect/TestFlight. Para instalación Ad Hoc,
-el perfil debe incluir los dispositivos registrados.
+| Archivo | Cómo se instala |
+| --- | --- |
+| `belgrano-norte.apk` | Descargar e instalar en Android; autorizar al navegador o a la app de archivos si Android lo solicita |
+| `belgrano-norte-unsigned.ipa` | **Sin firmar**. Cada usuario debe firmarlo e instalarlo con su propia cuenta y una herramienta de sideloading como AltStore Classic |
 
-## Configuración inicial
+El IPA no se instala con sólo tocar un enlace. Con una cuenta gratuita, las
+apps instaladas mediante AltStore Classic vencen a los 7 días y deben renovarse;
+la instalación inicial requiere configurar la herramienta y normalmente una
+computadora. No se necesita una membresía paga del autor para generar el IPA,
+pero no es una instalación tan sencilla como un APK. La compatibilidad real
+del IPA debe verificarse en un iPhone con esa herramienta.
 
-En GitHub → Settings → Secrets and variables → Actions, agregar los siguientes
-**repository secrets** (nunca subir las claves al repositorio):
+Ver las instrucciones oficiales de [AltStore Classic](https://faq.altstore.io/altstore-classic/your-altstore)
+y [AltServer](https://faq.altstore.io/altstore-classic/altserver).
+Para distribución iOS sin esa configuración por usuario, haría falta otra vía
+de distribución de Apple o una versión web de la app. Este proyecto todavía
+no incluye una versión web.
+
+## Enlaces a la última versión
+
+Una vez que exista un release, los nombres estables permiten compartir siempre
+estos enlaces:
+
+- [Último APK para Android](https://github.com/LucasGrasso/belgrano-norte-horarios/releases/latest/download/belgrano-norte.apk)
+- [Último IPA sin firmar](https://github.com/LucasGrasso/belgrano-norte-horarios/releases/latest/download/belgrano-norte-unsigned.ipa)
+- [Todas las versiones](https://github.com/LucasGrasso/belgrano-norte-horarios/releases)
+
+Mientras el repositorio sea privado, sólo funcionan para personas con acceso.
+Al hacerlo público, los releases también serán públicos. No se modifica la
+visibilidad desde estos workflows. El enlace al IPA requiere que ese release
+haya completado su build de iOS; puede añadirse después con una corrida manual.
+
+Cada archivo incluye un `.sha256` para verificar la descarga. Android mantiene
+el mismo identificador de aplicación y clave de firma entre versiones, para
+que instalar un APK nuevo actualice la app y conserve sus datos.
+
+## Configuración inicial: clave Android gratuita
+
+Android exige firmar los APK aunque no se use Play Store. La clave se puede
+generar localmente con el JDK; no requiere una cuenta de Google ni un pago.
+Si ya se distribuyó una versión con una clave de release, reutilizar esa clave.
+
+Para una app nueva, ejecutar fuera del repositorio, en una carpeta privada:
+
+```bash
+keytool -genkeypair -v -storetype PKCS12 \
+  -keystore belgrano-norte-release.p12 -alias belgrano-norte \
+  -keyalg RSA -keysize 2048 -validity 10000
+```
+
+Guardar una copia de respaldo de ese archivo y su contraseña. Para PKCS12,
+usar la misma contraseña para la clave y el almacén. Obtener su Base64:
+
+```bash
+base64 < belgrano-norte-release.p12 | tr -d '\n'
+```
+
+En GitHub → Settings → Secrets and variables → Actions, agregar estos cuatro
+**repository secrets**. No subir la clave al repositorio:
 
 | Secret | Contenido |
 | --- | --- |
-| `ANDROID_KEYSTORE_BASE64` | Keystore de release existente, codificado en Base64 |
-| `ANDROID_KEYSTORE_PASSWORD` | Contraseña del keystore |
-| `ANDROID_KEY_ALIAS` | Alias de la clave de firma |
+| `ANDROID_KEYSTORE_BASE64` | Archivo `.p12`/`.jks` codificado en Base64 |
+| `ANDROID_KEYSTORE_PASSWORD` | Contraseña del almacén |
+| `ANDROID_KEY_ALIAS` | `belgrano-norte`, o el alias de la clave existente |
 | `ANDROID_KEY_PASSWORD` | Contraseña de esa clave |
-| `IOS_CERTIFICATE_BASE64` | Certificado **Apple Distribution**, exportado como `.p12` con su clave privada y codificado en Base64 |
-| `IOS_CERTIFICATE_PASSWORD` | Contraseña no vacía del `.p12` |
-| `IOS_PROVISIONING_PROFILE_BASE64` | Perfil de distribución `.mobileprovision`, codificado en Base64 |
 
-Usar la misma clave Android de versiones previamente distribuidas si se quiere
-permitir la actualización de esas instalaciones. El código anterior firmaba
-con la clave de debug; una instalación previa con esa clave no podrá actualizarse
-con una nueva clave de release y deberá reinstalarse (se pierden datos locales).
-Guardar una copia de respaldo del keystore fuera de GitHub.
+No se necesitan secretos de Apple. La compilación de iOS usa
+`--no-codesign` y empaqueta `Payload/Runner.app` como IPA para firma por el usuario.
+El archivo se identifica como **unsigned** en el nombre y en las notas del release.
 
-Para preparar un secreto Base64 sin saltos de línea (Linux o macOS):
+Las versiones anteriores del proyecto usaban la clave de debug. Si alguien ya
+instaló una de esas versiones, cambiar a una clave de release impide actualizarla
+directamente: deberá desinstalarla primero y perderá los datos locales. En las
+siguientes versiones, conservar siempre la nueva clave de release.
 
-```bash
-base64 < release.jks | tr -d '\n'
-base64 < distribution.p12 | tr -d '\n'
-base64 < distribution.mobileprovision | tr -d '\n'
-```
-
-El bundle ID de iOS es `ar.com.lucasgrasso.trenBnHorarios`; el perfil debe usar
-ese App ID explícito, estar vigente y corresponder al certificado. El equipo
-y UUID se leen del perfil. El workflow rechaza perfiles de desarrollo,
-enterprise, vencidos o de otro App ID antes de compilar.
-
-La **repository variable** `IOS_EXPORT_METHOD` es opcional:
-
-| Valor | Perfil requerido | Uso |
-| --- | --- | --- |
-| `app-store-connect` (predeterminado) | App Store | Subir el IPA a App Store Connect/TestFlight |
-| `release-testing` | Ad Hoc | Instalar en dispositivos incluidos en el perfil |
-
-No hacen falta credenciales de las tiendas para generar estos artefactos.
-`GITHUB_TOKEN` lo provee Actions; sólo el job de publicación recibe
-`contents: write`. Las claves temporales se eliminan aun si falla el build.
-
-## Crear un release
+## Publicar una versión
 
 1. Actualizar `version: X.Y.Z+N` en `pubspec.yaml`, por ejemplo `0.2.0+2`.
-   Incrementar `N` en cada versión distribuida; no depende del número de corrida.
-2. Integrar el cambio en `main` y comprobar que los tests pasan.
-3. Crear y subir el tag correspondiente al mismo commit:
+   Incrementar `N` en cada versión distribuida.
+2. Integrar el cambio en `main` y comprobar que CI pasa.
+3. Crear y subir el tag del mismo commit:
 
    ```bash
    git tag v0.2.0
    git push origin v0.2.0
    ```
 
-Se aceptan versiones estables `X.Y.Z`; los tags y la versión deben coincidir.
-Los prereleases requieren extender la validación antes de usarlos.
+Los tags deben coincidir con la versión del archivo. Sólo se aceptan versiones
+estables `X.Y.Z`. El workflow corre el analizador y los tests, compila ambas
+plataformas en paralelo y publica los archivos en GitHub Releases.
+Si iOS falla pero Android termina bien, se publica el APK sin bloquear a los
+usuarios de Android. Si falla Android, no se crea un nuevo release que deje
+sin APK al enlace de la última versión. Los artefactos de builds exitosos
+también quedan en Actions durante 14 días.
 
-También se puede ejecutar **Mobile release → Run workflow**, seleccionando un
-**tag existente** en el selector de referencia. Elegir `android`, `ios` o `both`.
-Por defecto, una ejecución manual sólo genera artefactos; activar `publish` para
-crear el GitHub Release. Esto permite preparar Android antes de contar con la
-membresía/certificados de Apple. La ejecución automática por tag exige ambas
-plataformas configuradas.
-
-Una corrida interrumpida puede dejar un borrador; volver a correrla completa
-reemplaza sus artefactos y lo publica al terminar. Un release ya publicado no
-se sobreescribe: usar una nueva versión. Para un borrador parcial creado con una
-selección de plataformas diferente, eliminarlo antes de volver a intentarlo.
+Desde **Mobile release → Run workflow** se puede seleccionar un **tag existente**
+y elegir `android`, `ios` o `both`. Una corrida manual sólo genera artefactos
+por defecto; activar `publish` para publicarlos. Después de un release sólo
+Android, una corrida `ios` con el mismo tag y `publish` puede añadir el IPA.
+Los archivos de un release ya publicado no se sobreescriben; para reemplazar
+una descarga, crear una nueva versión. Los borradores incompletos sí admiten
+reemplazo al reintentar la corrida.
 
 ## Builds locales
 
-Flutter **3.44.6** (Dart 3.12.2), Java 17 y el lockfile son compartidos con CI.
-El workflow de iOS usa macOS 15, Xcode 26.3 y CocoaPods con `--deployment`.
-Al actualizar dependencias nativas, actualizar y commitear también
-`ios/Podfile.lock` desde un Mac.
-
-Android ya no usa la clave de debug para release. Crear `android/key.properties`
-(ignorado por Git), usando una ruta absoluta al keystore:
+Usar Flutter **3.44.6** (Dart 3.12.2), Java 17 y el lockfile. Android no usa
+la clave de debug para release. Crear `android/key.properties` (ignorado por Git):
 
 ```properties
-storeFile=/ruta/privada/release.jks
+storeFile=/ruta/privada/belgrano-norte-release.p12
 storePassword=...
-keyAlias=...
+keyAlias=belgrano-norte
 keyPassword=...
 ```
 
 También se aceptan `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`,
 `ANDROID_KEY_ALIAS` y `ANDROID_KEY_PASSWORD` como variables de entorno.
 `flutter run` y los builds debug no requieren estos secretos.
+El build iOS corre en macOS 15/Xcode 26.3 con CocoaPods `--deployment`;
+si cambian dependencias nativas, actualizar `ios/Podfile.lock` desde un Mac.
 
 ## Referencias
 
-- [Distribuir Android con Flutter](https://docs.flutter.dev/deployment/android)
-- [Distribuir iOS con Flutter](https://docs.flutter.dev/deployment/ios)
-- [Instalar certificados Apple en Actions](https://docs.github.com/en/enterprise-cloud%40latest/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications)
-- [Toolchains disponibles en macOS 15](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md)
+- [Firma y distribución Android](https://developer.android.com/studio/publish/app-signing)
+- [Builds iOS con Flutter](https://docs.flutter.dev/deployment/ios)
+- [AltStore Classic: renovación de apps y cuenta gratuita](https://faq.altstore.io/altstore-classic/your-altstore)
+- [AltServer: instalación y renovación](https://faq.altstore.io/altstore-classic/altserver)

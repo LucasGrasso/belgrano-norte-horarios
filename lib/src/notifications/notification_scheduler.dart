@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
@@ -6,18 +8,22 @@ import '../domain/models.dart';
 import '../domain/service_calendar.dart';
 import '../domain/trip_finder.dart';
 import 'alert.dart';
+import 'notification_plan.dart';
 
-/// Schedules the recurring "next trains" notifications.
-///
-/// Because the timetable is static between monthly updates, each alert is
-/// expanded into one *weekly repeating* zoned notification per selected
-/// weekday, with the next departures for that weekday's service computed at
-/// scheduling time. Everything is rescheduled whenever alerts change or the
-/// timetable updates, so the content can never drift more than one month.
+/// Maintains a bounded queue of dated notifications, replenished on app
+/// launch/resume, alert edits, and background checks on Android and iOS.
 class NotificationScheduler {
-  NotificationScheduler(this._plugin);
+  NotificationScheduler(
+    this._plugin, {
+    tz.TZDateTime Function()? now,
+    int? maxPending,
+  }) : _now = now ?? nowInArgentina,
+       _maxPending = maxPending ?? (Platform.isIOS ? 64 : 500);
 
   final FlutterLocalNotificationsPlugin _plugin;
+  final tz.TZDateTime Function() _now;
+  final int _maxPending;
+  Future<void> _pending = Future.value();
 
   static const _channel = AndroidNotificationDetails(
     'train_alerts',
@@ -46,8 +52,10 @@ class NotificationScheduler {
   /// Requests platform permissions in context (first alert creation).
   /// Returns true when notifications are allowed.
   Future<bool> requestPermissions() async {
-    final android = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
+    final android = _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
     if (android != null) {
       final granted = await android.requestNotificationsPermission() ?? false;
       // Exact alarms make the alert fire at the configured minute. If the
@@ -57,18 +65,26 @@ class NotificationScheduler {
       }
       return granted;
     }
-    final ios = _plugin.resolvePlatformSpecificImplementation<
-        IOSFlutterLocalNotificationsPlugin>();
+    final ios = _plugin
+        .resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin
+        >();
     if (ios != null) {
-      return await ios.requestPermissions(alert: true, badge: true, sound: true) ??
+      return await ios.requestPermissions(
+            alert: true,
+            badge: true,
+            sound: true,
+          ) ??
           false;
     }
     return true;
   }
 
   Future<AndroidScheduleMode> _scheduleMode() async {
-    final android = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
+    final android = _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
     if (android != null &&
         (await android.canScheduleExactNotifications() ?? false)) {
       return AndroidScheduleMode.exactAllowWhileIdle;
@@ -76,68 +92,41 @@ class NotificationScheduler {
     return AndroidScheduleMode.inexactAllowWhileIdle;
   }
 
-  /// Cancels everything and reschedules all enabled alerts against
-  /// [timetable]. Call after any alert edit and after timetable updates.
-  /// [isHoliday] makes the content of the *next* occurrence feriado-aware;
-  /// the weekly repeat then reuses that content until the next reschedule
-  /// (app launch or timetable update), which bounds the drift.
-  Future<void> rescheduleAll(List<Alert> alerts, Timetable timetable,
-      {HolidayResolver? isHoliday}) async {
-    await _plugin.cancelAll();
-    final mode = await _scheduleMode();
-    for (final alert in alerts.where((a) => a.enabled)) {
-      for (final weekday in alert.weekdays) {
-        await _scheduleWeekly(alert, weekday, timetable, mode, isHoliday);
+  /// Replaces the pending queue, including legacy weekly notifications,
+  /// without dismissing notifications that have already been delivered.
+  /// Serialize calls so rapid alert edits cannot interleave cancellations.
+  Future<void> rescheduleAll(
+    List<Alert> alerts,
+    Timetable timetable, {
+    HolidayResolver? isHoliday,
+  }) {
+    final snapshot = List<Alert>.of(alerts);
+    final result = _pending.then((_) async {
+      final planned = planNotifications(
+        snapshot,
+        timetable,
+        now: _now(),
+        isHoliday: isHoliday,
+        maxPending: _maxPending,
+      );
+      final mode = await _scheduleMode();
+      await _plugin.cancelAllPendingNotifications();
+      for (final notification in planned) {
+        await _plugin.zonedSchedule(
+          id: notification.id,
+          title: notification.title,
+          body: notification.body,
+          scheduledDate: notification.fireAt,
+          notificationDetails: const NotificationDetails(
+            android: _channel,
+            iOS: DarwinNotificationDetails(),
+          ),
+          androidScheduleMode: mode,
+          // Deliberately one-off: repeating a holiday's body next week is wrong.
+        );
       }
-    }
+    });
+    _pending = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return result;
   }
-
-  Future<void> _scheduleWeekly(Alert alert, int weekday, Timetable timetable,
-      AndroidScheduleMode mode, HolidayResolver? isHoliday) async {
-    final fireAt = _nextInstanceOf(weekday, alert.hour, alert.minute);
-    final departures = findNextDepartures(
-      timetable,
-      from: alert.from,
-      to: alert.to,
-      when: fireAt,
-      isHoliday: isHoliday,
-      limit: 3,
-    );
-    final route = '${kStations[alert.from]} → ${kStations[alert.to]}';
-    final body = departures.isEmpty
-        ? 'Sin más servicios programados a esta hora.'
-        : departures
-            .map((d) =>
-                '${_hhmm(d.departs)} (llega ${_hhmm(d.arrives)})')
-            .join('  ·  ');
-
-    await _plugin.zonedSchedule(
-      id: alert.id * 10 + weekday,
-      title: 'Próximos trenes $route',
-      body: body,
-      scheduledDate: fireAt,
-      notificationDetails: const NotificationDetails(
-        android: _channel,
-        iOS: DarwinNotificationDetails(),
-      ),
-      androidScheduleMode: mode,
-      matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
-    );
-  }
-
-  /// Next occurrence of [weekday] at hh:mm in Argentina time.
-  tz.TZDateTime _nextInstanceOf(int weekday, int hour, int minute) {
-    final now = nowInArgentina();
-    var t = tz.TZDateTime(
-        argentina, now.year, now.month, now.day, hour, minute);
-    while (t.weekday != weekday || t.isBefore(now)) {
-      t = t.add(const Duration(days: 1));
-      t = tz.TZDateTime(argentina, t.year, t.month, t.day, hour, minute);
-    }
-    return t;
-  }
-
-  static String _hhmm(DateTime t) =>
-      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 }
-

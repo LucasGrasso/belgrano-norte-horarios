@@ -95,7 +95,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       context: context,
       initialDate: _when,
       firstDate: now.subtract(const Duration(days: 1)),
-      lastDate: now.add(const Duration(days: 60)),
+      lastDate: now.add(const Duration(days: kScheduleHorizonDays)),
     );
     if (date == null || !mounted) return;
     final time = await showTimePicker(

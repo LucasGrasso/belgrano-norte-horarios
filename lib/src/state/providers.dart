@@ -9,30 +9,41 @@ import '../notifications/notification_scheduler.dart';
 
 final timetableServiceProvider = FutureProvider<TimetableService>((ref) async {
   final store = await TimetableStore.open();
-  return TimetableService(store);
+  final service = TimetableService(store);
+  ref.onDispose(service.close);
+  return service;
 });
 
-final notificationSchedulerProvider =
-    FutureProvider<NotificationScheduler>((ref) => NotificationScheduler.initialize());
+final notificationSchedulerProvider = FutureProvider<NotificationScheduler>(
+  (ref) => NotificationScheduler.initialize(),
+);
+
+final holidayServiceProvider = FutureProvider<HolidayService>((ref) async {
+  final service = await HolidayService.open();
+  ref.onDispose(service.close);
+  return service;
+});
 
 /// National-holiday calendar (feriados run the Sunday timetable).
 class HolidaysController extends AsyncNotifier<HolidayCalendar> {
   @override
   Future<HolidayCalendar> build() async {
-    final service = await HolidayService.open();
+    final service = await ref.watch(holidayServiceProvider.future);
     return service.load();
   }
 
-  /// Fetches missing years (once per year in practice). Silent on failure.
+  /// Refreshes missing/stale holiday feeds (14-day TTL). Silent on fetch failure.
   Future<void> refresh() async {
-    final service = await HolidayService.open();
+    final service = await ref.read(holidayServiceProvider.future);
     final updated = await service.ensureCurrentYears();
     state = AsyncData(updated);
   }
 }
 
 final holidaysProvider =
-    AsyncNotifierProvider<HolidaysController, HolidayCalendar>(HolidaysController.new);
+    AsyncNotifierProvider<HolidaysController, HolidayCalendar>(
+      HolidaysController.new,
+    );
 
 /// The timetable. `null` means "never fetched yet" (first-run screen).
 class TimetableController extends AsyncNotifier<Timetable?> {
@@ -66,23 +77,29 @@ class TimetableController extends AsyncNotifier<Timetable?> {
     if (current == null) return; // first download remains an explicit action
     final service = await ref.read(timetableServiceProvider.future);
     final updated = await service.updateIfNewMonth();
-    if (updated != null) {
-      state = AsyncData(updated);
-    }
-    await _rescheduleAlerts(updated ?? current);
+    // Background work may already have refreshed the on-disk timetable and
+    // month marker while this UI isolate still holds the previous timetable.
+    final latest = updated ?? await service.loadStored() ?? current;
+    state = AsyncData(latest);
+    await _rescheduleAlerts(latest);
   }
 
   Future<void> _rescheduleAlerts(Timetable timetable) async {
     final scheduler = await ref.read(notificationSchedulerProvider.future);
     final alerts = await ref.read(alertsProvider.future);
     final holidays = await ref.read(holidaysProvider.future);
-    await scheduler.rescheduleAll(alerts, timetable,
-        isHoliday: holidays.isHoliday);
+    await scheduler.rescheduleAll(
+      alerts,
+      timetable,
+      isHoliday: holidays.isHoliday,
+    );
   }
 }
 
 final timetableProvider =
-    AsyncNotifierProvider<TimetableController, Timetable?>(TimetableController.new);
+    AsyncNotifierProvider<TimetableController, Timetable?>(
+      TimetableController.new,
+    );
 
 class AlertsController extends AsyncNotifier<List<Alert>> {
   final _store = AlertStore();
@@ -115,12 +132,15 @@ class AlertsController extends AsyncNotifier<List<Alert>> {
     if (timetable != null) {
       final scheduler = await ref.read(notificationSchedulerProvider.future);
       final holidays = ref.read(holidaysProvider).value;
-      await scheduler.rescheduleAll(alerts, timetable,
-          isHoliday: holidays?.isHoliday);
+      await scheduler.rescheduleAll(
+        alerts,
+        timetable,
+        isHoliday: holidays?.isHoliday,
+      );
     }
   }
 }
 
-final alertsProvider =
-    AsyncNotifierProvider<AlertsController, List<Alert>>(AlertsController.new);
-
+final alertsProvider = AsyncNotifierProvider<AlertsController, List<Alert>>(
+  AlertsController.new,
+);

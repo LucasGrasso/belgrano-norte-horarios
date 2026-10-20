@@ -35,3 +35,12 @@ jobs:
           path: coverage/lcov.info
           if-no-files-found: error
           retention-days: 14
+
+  ios-compile:
+    # Compile native background-task wiring on PRs without duplicating the
+    # signed/unsigned platform builds in the tag-triggered release pipeline.
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/release-ios.yml
+    with:
+      version: '0.0.0'
+      build-number: '1'

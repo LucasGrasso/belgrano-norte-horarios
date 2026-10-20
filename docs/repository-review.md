@@ -123,7 +123,8 @@ generated signing key; no store account is required. The unsigned iOS download
 requires each user to sign/install it with their own account and a sideloading
 tool. Neither APK distribution nor unsigned IPA generation requires store
 credentials. Real-device installation checks are still required.
-Review redistribution rights for the bundled Segoe UI fonts and the Syncfusion
-license before public distribution; no licensing determination was made here.
+Review redistribution rights for the bundled Segoe UI fonts before public
+distribution. The PDF engine now uses Apache-2.0 packages (`pdf_document`,
+`pdf_graphics` and `pdf_cos`); retain their license notices when redistributing.
 Configure protected tags/review rules and automatic updates for the pinned
 Actions/toolchain as the next maintenance step.

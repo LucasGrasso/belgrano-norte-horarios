@@ -29,7 +29,7 @@ lo parsea en el dispositivo y después funciona sin conexión.
 
 ```
 lib/src/
-  data/       pdf_parser.dart        parser posicional del PDF (syncfusion)
+  data/       pdf_parser.dart        parser posicional del PDF (pdf_graphics)
               timetable_store.dart   persistencia atómica JSON
               timetable_service.dart fetch + política de actualización mensual
   domain/     models.dart            estaciones canónicas, Trip/Stop/Timetable
@@ -55,6 +55,11 @@ El parser valida (columnas = 23, tiempos monotónicos, paridad de número de
 tren por sentido, cantidad mínima de servicios) y ante cualquier anomalía
 lanza `TimetableParseException`: la app nunca reemplaza datos buenos por un
 parseo dudoso.
+
+La lectura del PDF usa `pdf_document` y `pdf_graphics`, bibliotecas de Dart
+con licencia Apache-2.0. No requiere cuenta ni licencia de Syncfusion, ni
+agrega librerías nativas a Android/iOS. Los tests comparan el cuadro completo
+contra la referencia anterior: todos los trenes, estaciones y minutos.
 
 ## Cómo correr la app
 

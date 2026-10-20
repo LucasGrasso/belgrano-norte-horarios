@@ -18,7 +18,8 @@ dependencies:
   intl: ^0.20.3
   path_provider: ^2.1.6
   shared_preferences: ^2.5.5
-  syncfusion_flutter_pdf: ^34.1.30
+  pdf_document: ^10.0.0
+  pdf_graphics: ^10.0.0
   timezone: ^0.11.1
   workmanager: ^0.9.0+3
 

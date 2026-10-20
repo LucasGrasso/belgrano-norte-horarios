@@ -9,6 +9,7 @@ import 'package:tren_bn_horarios/src/domain/models.dart';
 import 'package:tren_bn_horarios/src/domain/service_calendar.dart';
 import 'package:tren_bn_horarios/src/state/providers.dart';
 import 'package:tren_bn_horarios/src/ui/home_screen.dart';
+import 'package:tren_bn_horarios/src/ui/app.dart';
 
 class _TimetableController extends TimetableController {
   @override
@@ -37,6 +38,16 @@ Trip _trip(int number, int departure) =>
 class _HolidaysController extends HolidaysController {
   @override
   Future<HolidayCalendar> build() async => const HolidayCalendar.empty();
+}
+
+class _ShellTimetableController extends _TimetableController {
+  @override
+  Future<void> monthlyCheck() async {}
+}
+
+class _ShellHolidaysController extends _HolidaysController {
+  @override
+  Future<void> refresh() async {}
 }
 
 String firstTrain(WidgetTester tester) => tester
@@ -166,4 +177,37 @@ void main() {
     expect(find.text('Ahora'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets('invalid saved station IDs fall back to the default route', (tester) async {
+    SharedPreferences.setMockInitialValues({'route.from': -1, 'route.to': 999});
+    await openHome(tester, () => tz.TZDateTime(argentina, 2026, 7, 6, 14, 30));
+    expect(firstTrain(tester), 'Tren 101');
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('changing tabs preserves the custom search time', (tester) async {
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        timetableProvider.overrideWith(_ShellTimetableController.new),
+        holidaysProvider.overrideWith(_ShellHolidaysController.new),
+      ],
+      child: const TrenApp(),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ahora'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Volver a "ahora"'), findsOneWidget);
+    await tester.tap(find.text('Alertas'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Buscar'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Volver a "ahora"'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }
+

@@ -87,6 +87,11 @@ app funciona sin conexión.
 
 ## Desarrollo
 
+CI y descargas de APK e IPA sin firmar para instalación con firma propia:
+[guía de releases](docs/releases.md). No requiere cuentas de las tiendas.
+Análisis del repositorio y próximos cambios recomendados:
+[revisión técnica y de UI](docs/repository-review.md).
+
 ```
 flutter test      # incluye tests del parser contra test/fixtures/*.pdf
 flutter analyze

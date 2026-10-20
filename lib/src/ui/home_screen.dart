@@ -71,7 +71,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final prefs = await SharedPreferences.getInstance();
     final from = prefs.getInt('route.from');
     final to = prefs.getInt('route.to');
-    if (from != null && to != null && from != to && mounted) {
+    if (from != null && to != null && from != to &&
+        from >= 0 && from < kStations.length &&
+        to >= 0 && to < kStations.length && mounted) {
       setState(() {
         _from = from;
         _to = to;
@@ -479,3 +481,4 @@ class _DashedConnectorPainter extends CustomPainter {
   bool shouldRepaint(_DashedConnectorPainter oldDelegate) =>
       color != oldDelegate.color;
 }
+

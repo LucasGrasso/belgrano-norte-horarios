@@ -106,16 +106,38 @@ class _Shell extends ConsumerStatefulWidget {
 
 class _ShellState extends ConsumerState<_Shell> {
   int _tab = 0;
+  bool _refreshing = false;
+  late final AppLifecycleListener _lifecycleObserver;
 
   @override
   void initState() {
     super.initState();
-    // Silent monthly timetable check + yearly feriados fetch once the first
-    // frame is up.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(timetableProvider.notifier).monthlyCheck();
-      ref.read(holidaysProvider.notifier).refresh();
-    });
+    _lifecycleObserver = AppLifecycleListener(onResume: _refreshSchedules);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshSchedules());
+  }
+
+  Future<void> _refreshSchedules() async {
+    if (_refreshing || !mounted) return;
+    _refreshing = true;
+    try {
+      await ref.read(timetableProvider.future);
+      if (!mounted) return;
+      // Alerts must use the refreshed holiday calendar, even when the
+      // monthly timetable download is not due.
+      await ref.read(holidaysProvider.notifier).refresh();
+      if (!mounted) return;
+      await ref.read(timetableProvider.notifier).monthlyCheck();
+    } on Exception catch (error) {
+      debugPrint('Could not refresh schedules: $error');
+    } finally {
+      _refreshing = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _lifecycleObserver.dispose();
+    super.dispose();
   }
 
   @override
@@ -127,11 +149,10 @@ class _ShellState extends ConsumerState<_Shell> {
       error: (e, _) => FirstRunScreen(error: e),
       data: (t) {
         if (t == null) return const FirstRunScreen();
-        return switch (_tab) {
-          0 => const HomeScreen(),
-          1 => const AlertsScreen(),
-          _ => const SettingsScreen(),
-        };
+        return IndexedStack(
+          index: _tab,
+          children: const [HomeScreen(), AlertsScreen(), SettingsScreen()],
+        );
       },
     );
 
@@ -169,3 +190,4 @@ class _ShellState extends ConsumerState<_Shell> {
     );
   }
 }
+

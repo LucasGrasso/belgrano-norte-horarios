@@ -1,0 +1,123 @@
+name: Mobile release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platforms to build (select an existing version tag above)
+        type: choice
+        options: [both, android, ios]
+        default: both
+      publish:
+        description: Publish a GitHub Release after successful builds
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      name: ${{ steps.version.outputs.name }}
+      number: ${{ steps.version.outputs.number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require a version tag matching pubspec.yaml
+        id: version
+        run: python3 tool/release_version.py
+
+  checks:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+
+  android:
+    needs: [version, checks]
+    if: github.event_name == 'push' || inputs.platform != 'ios'
+    uses: ./.github/workflows/release-android.yml
+    with:
+      version: ${{ needs.version.outputs.name }}
+      build-number: ${{ needs.version.outputs.number }}
+    secrets:
+      keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      keystore-password: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+      key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+  ios:
+    needs: [version, checks]
+    if: github.event_name == 'push' || inputs.platform != 'android'
+    uses: ./.github/workflows/release-ios.yml
+    with:
+      version: ${{ needs.version.outputs.name }}
+      build-number: ${{ needs.version.outputs.number }}
+
+  publish:
+    needs: [version, checks, android, ios]
+    if: >-
+      always() && !cancelled() &&
+      (github.event_name == 'push' || inputs.publish) &&
+      needs.version.result == 'success' && needs.checks.result == 'success' &&
+      (needs.android.result == 'success' ||
+      (needs.android.result == 'skipped' && needs.ios.result == 'success'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - name: Publish available downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Publish successful platforms even if the other build failed.
+          # Stable filenames provide /releases/latest/download/<filename> links.
+          for asset in dist/*; do
+            filename="$(basename "$asset")"
+            (cd dist && sha256sum "$filename" > "$filename.sha256")
+          done
+          upload_options=()
+          if gh release view "$RELEASE_TAG" --json isDraft > release.json; then
+            if python3 -c 'import json; raise SystemExit(not json.load(open("release.json"))["isDraft"])'; then
+              upload_options+=(--clobber)
+            fi
+          else
+            if [[ "${{ needs.android.result }}" != 'success' ]]; then
+              echo '::error::Publish Android first so the latest release always has an APK.'
+              exit 1
+            fi
+            gh release create "$RELEASE_TAG" --verify-tag --draft \
+              --title "$RELEASE_TAG" --generate-notes --notes-file <(cat <<'NOTES'
+          Android: download belgrano-norte.apk and allow installation from your browser/files app when Android asks. No Play Store account is needed.
+
+          iPhone/iPad: belgrano-norte-unsigned.ipa is UNSIGNED. Downloading it does not install the app. Use a self-signing tool such as AltStore Classic with your own Apple ID; free-account installations need refreshing every 7 days. This is not an App Store or TestFlight build.
+
+          Installation and updates: https://github.com/LucasGrasso/belgrano-norte-horarios/blob/main/docs/releases.md
+
+          Each download has a matching .sha256 checksum. If a platform is missing, its build has not completed successfully; check Actions.
+          NOTES
+              )
+            upload_options+=(--clobber)
+          fi
+          # Published assets are immutable. A later single-platform run may
+          # add missing files, but cannot overwrite an existing download.
+          gh release upload "$RELEASE_TAG" dist/* "${upload_options[@]}"
+          gh release edit "$RELEASE_TAG" --draft=false

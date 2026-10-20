@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
 import '../domain/models.dart';
+import 'atomic_file.dart';
 
 /// Persists the parsed timetable as JSON in the app's support directory.
 /// Writes are atomic (temp file + rename) so a crash mid-write can never
@@ -27,10 +28,6 @@ class TimetableStore {
     }
   }
 
-  Future<void> save(Timetable timetable) async {
-    final tmp = File('${_file.path}.tmp');
-    await tmp.writeAsString(timetable.encode(), flush: true);
-    if (await _file.exists()) await _file.delete();
-    await tmp.rename(_file.path);
-  }
+  Future<void> save(Timetable timetable) => atomicWrite(_file, timetable.encode());
 }
+

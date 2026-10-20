@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import '../domain/service_calendar.dart';
+import 'atomic_file.dart';
 
 /// Official national-holiday feed, one file per year (argentina.gob.ar).
 String holidaysUrl(int year) =>
@@ -120,9 +121,7 @@ class HolidayService {
       }
     }
     raw['$year'] = dates.toList()..sort();
-    final tmp = File('${_file.path}.tmp');
-    await tmp.writeAsString(jsonEncode(raw), flush: true);
-    if (await _file.exists()) await _file.delete();
-    await tmp.rename(_file.path);
+    await atomicWrite(_file, jsonEncode(raw));
   }
 }
+

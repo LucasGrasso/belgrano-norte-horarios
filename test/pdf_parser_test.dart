@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -10,8 +11,9 @@ void main() {
   late Timetable t;
 
   setUpAll(() {
-    final bytes =
-        File('test/fixtures/horarios-tren-belgrano-norte.pdf').readAsBytesSync();
+    final bytes = File(
+      'test/fixtures/horarios-tren-belgrano-norte.pdf',
+    ).readAsBytesSync();
     t = parseTimetablePdf(bytes, fetchedAt: DateTime.utc(2026, 7, 9));
   });
 
@@ -23,6 +25,15 @@ void main() {
     expect(t.validFrom, '2026-05-19');
   });
 
+  test('matches every train and station time from the previous PDF engine', () {
+    // Captured before replacing Syncfusion. Checking the complete output also
+    // catches shifted/missing cells that aggregate counts cannot detect.
+    final expected = jsonDecode(
+      File('test/fixtures/horario-21.expected.json').readAsStringSync(),
+    );
+    expect(jsonDecode(t.encode()), expected);
+  });
+
   test('trip counts per section', () {
     expect(t.tripsFor(DayType.weekday, Direction.toVillaRosa).length, 74);
     expect(t.tripsFor(DayType.weekday, Direction.toRetiro).length, 71);
@@ -32,14 +43,17 @@ void main() {
     expect(t.tripsFor(DayType.sundayHoliday, Direction.toRetiro).length, 37);
   });
 
-  test('full-run weekday train 3013: Retiro 04:37 -> Villa Rosa 06:07, 23 stops', () {
-    final trip = find(DayType.weekday, Direction.toVillaRosa, 3013);
-    expect(trip.stops.length, 23);
-    expect(trip.stops.first.station, 0);
-    expect(trip.stops.first.minutes, 4 * 60 + 37);
-    expect(trip.stops.last.station, 22);
-    expect(trip.stops.last.minutes, 6 * 60 + 7);
-  });
+  test(
+    'full-run weekday train 3013: Retiro 04:37 -> Villa Rosa 06:07, 23 stops',
+    () {
+      final trip = find(DayType.weekday, Direction.toVillaRosa, 3013);
+      expect(trip.stops.length, 23);
+      expect(trip.stops.first.station, 0);
+      expect(trip.stops.first.minutes, 4 * 60 + 37);
+      expect(trip.stops.last.station, 22);
+      expect(trip.stops.last.minutes, 6 * 60 + 7);
+    },
+  );
 
   test('short-turn train 3003 starts at Boulogne (blank leading cells)', () {
     final trip = find(DayType.weekday, Direction.toVillaRosa, 3003);
@@ -80,10 +94,16 @@ void main() {
         for (final trip in t.tripsFor(day, dir)) {
           for (var i = 1; i < trip.stops.length; i++) {
             final delta = trip.stops[i].minutes - trip.stops[i - 1].minutes;
-            expect(delta, greaterThan(0),
-                reason: 'train ${trip.number} $day $dir stop $i');
-            expect(delta, lessThanOrEqualTo(30),
-                reason: 'train ${trip.number} $day $dir stop $i');
+            expect(
+              delta,
+              greaterThan(0),
+              reason: 'train ${trip.number} $day $dir stop $i',
+            );
+            expect(
+              delta,
+              lessThanOrEqualTo(30),
+              reason: 'train ${trip.number} $day $dir stop $i',
+            );
           }
         }
       }
@@ -99,11 +119,20 @@ void main() {
     expect(a.first.stops.first.minutes, b.first.stops.first.minutes);
   });
 
-  test('corrupt pdf throws TimetableParseException-compatible error', () {
+  test('corrupt pdf throws TimetableParseException', () {
     expect(
-      () => parseTimetablePdf(List<int>.filled(100, 0),
-          fetchedAt: DateTime.now()),
-      throwsA(anything),
+      () => parseTimetablePdf(
+        List<int>.filled(100, 0),
+        fetchedAt: DateTime.now(),
+      ),
+      throwsA(isA<TimetableParseException>()),
+    );
+  });
+
+  test('empty input throws TimetableParseException', () {
+    expect(
+      () => parseTimetablePdf([], fetchedAt: DateTime.utc(2026)),
+      throwsA(isA<TimetableParseException>()),
     );
   });
 }

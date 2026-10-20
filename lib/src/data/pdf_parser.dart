@@ -1,4 +1,8 @@
-import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'dart:math' as math;
+import 'dart:typed_data';
+
+import 'package:pdf_document/pdf_document.dart';
+import 'package:pdf_graphics/pdf_graphics.dart';
 
 import '../domain/models.dart';
 
@@ -16,8 +20,17 @@ class TimetableParseException implements Exception {
 }
 
 const _monthNames = {
-  'ENERO': 1, 'FEBRERO': 2, 'MARZO': 3, 'ABRIL': 4, 'MAYO': 5, 'JUNIO': 6,
-  'JULIO': 7, 'AGOSTO': 8, 'SEPTIEMBRE': 9, 'OCTUBRE': 10, 'NOVIEMBRE': 11,
+  'ENERO': 1,
+  'FEBRERO': 2,
+  'MARZO': 3,
+  'ABRIL': 4,
+  'MAYO': 5,
+  'JUNIO': 6,
+  'JULIO': 7,
+  'AGOSTO': 8,
+  'SEPTIEMBRE': 9,
+  'OCTUBRE': 10,
+  'NOVIEMBRE': 11,
   'DICIEMBRE': 12,
 };
 
@@ -42,9 +55,8 @@ class _Word {
 /// the x-centers of all time cells of a direction cluster into exactly 23
 /// columns. On "hacia Retiro" pages the column order is reversed.
 Timetable parseTimetablePdf(List<int> bytes, {required DateTime fetchedAt}) {
-  final doc = PdfDocument(inputBytes: bytes);
   try {
-    final extractor = PdfTextExtractor(doc);
+    final doc = PdfDocument.open(Uint8List.fromList(bytes));
     final problems = <String>[];
 
     int? scheduleNumber;
@@ -57,18 +69,10 @@ Timetable parseTimetablePdf(List<int> bytes, {required DateTime fetchedAt}) {
       Direction.toRetiro: [],
     };
 
-    for (var p = 0; p < doc.pages.count; p++) {
-      final lines = extractor.extractTextLines(startPageIndex: p, endPageIndex: p);
-      final words = <_Word>[];
-      for (final line in lines) {
-        for (final w in line.wordCollection) {
-          final t = w.text.trim();
-          if (t.isEmpty) continue;
-          words.add(_Word(t, w.bounds.left, w.bounds.right, w.bounds.top,
-              w.bounds.bottom));
-        }
-      }
-      final pageText = words.map((w) => w.text).join(' ').toUpperCase();
+    for (var p = 0; p < doc.pageCount; p++) {
+      final text = PdfTextExtractor.extract(doc, p);
+      final words = _extractWords(text);
+      final pageText = text.text.replaceAll(RegExp(r'\s+'), ' ').toUpperCase();
 
       scheduleNumber ??= _parseScheduleNumber(pageText);
       validFrom ??= _parseValidFrom(pageText);
@@ -76,15 +80,15 @@ Timetable parseTimetablePdf(List<int> bytes, {required DateTime fetchedAt}) {
       final day = pageText.contains('LUNES A VIERNES')
           ? DayType.weekday
           : pageText.contains('BADOS') // SÁBADOS with any accent handling
-              ? DayType.saturday
-              : pageText.contains('DOMINGOS')
-                  ? DayType.sundayHoliday
-                  : null;
+          ? DayType.saturday
+          : pageText.contains('DOMINGOS')
+          ? DayType.sundayHoliday
+          : null;
       final dir = pageText.contains('HACIA VILLA ROSA')
           ? Direction.toVillaRosa
           : pageText.contains('HACIA RETIRO')
-              ? Direction.toRetiro
-              : null;
+          ? Direction.toRetiro
+          : null;
       if (day == null || dir == null) {
         problems.add('page ${p + 1}: unclassifiable (day=$day dir=$dir)');
         continue;
@@ -97,7 +101,8 @@ Timetable parseTimetablePdf(List<int> bytes, {required DateTime fetchedAt}) {
 
     if (scheduleNumber == null || validFrom == null) {
       throw TimetableParseException(
-          'header not found (scheduleNumber=$scheduleNumber validFrom=$validFrom)');
+        'header not found (scheduleNumber=$scheduleNumber validFrom=$validFrom)',
+      );
     }
 
     // Column grid per direction, from all pages of that direction.
@@ -106,7 +111,8 @@ Timetable parseTimetablePdf(List<int> bytes, {required DateTime fetchedAt}) {
       final c = _clusterCenters(e.value);
       if (c.length != kStations.length) {
         throw TimetableParseException(
-            '${e.key}: found ${c.length} columns, expected ${kStations.length}');
+          '${e.key}: found ${c.length} columns, expected ${kStations.length}',
+        );
       }
       centers[e.key] = c;
     }
@@ -118,8 +124,9 @@ Timetable parseTimetablePdf(List<int> bytes, {required DateTime fetchedAt}) {
 
     for (final page in pages) {
       final cols = centers[page.dir]!;
-      final timeWords =
-          page.words.where((w) => _timeRe.hasMatch(w.text)).toList();
+      final timeWords = page.words
+          .where((w) => _timeRe.hasMatch(w.text))
+          .toList();
       final trainWords = page.words
           .where((w) => _trainRe.hasMatch(w.text) && w.x1 < cols.first - 10)
           .toList();
@@ -151,12 +158,14 @@ Timetable parseTimetablePdf(List<int> bytes, {required DateTime fetchedAt}) {
           final station = page.dir == Direction.toVillaRosa
               ? col
               : kStations.length - 1 - col;
-          var mins = int.parse(time.substring(0, 2)) * 60 +
+          var mins =
+              int.parse(time.substring(0, 2)) * 60 +
               int.parse(time.substring(3));
           if (prev != null && mins < prev) mins += 24 * 60; // crossed midnight
           if (prev != null && (mins - prev <= 0 || mins - prev > 30)) {
             problems.add(
-                'train ${tw.text}: implausible step ${prev}m -> ${mins}m at ${kStations[station]}');
+              'train ${tw.text}: implausible step ${prev}m -> ${mins}m at ${kStations[station]}',
+            );
           }
           prev = mins;
           stops.add(Stop(station, mins));
@@ -173,7 +182,9 @@ Timetable parseTimetablePdf(List<int> bytes, {required DateTime fetchedAt}) {
 
     if (problems.isNotEmpty) {
       throw TimetableParseException(
-          '${problems.length} problems while parsing', problems);
+        '${problems.length} problems while parsing',
+        problems,
+      );
     }
 
     for (final byDir in services.values) {
@@ -191,9 +202,48 @@ Timetable parseTimetablePdf(List<int> bytes, {required DateTime fetchedAt}) {
       fetchedAt: fetchedAt.toUtc().toIso8601String(),
       services: services,
     );
-  } finally {
-    doc.dispose();
+  } on TimetableParseException {
+    rethrow;
+  } catch (error) {
+    // Keep third-party decoding failures inside the same public error contract
+    // as layout validation, so callers retain their last good timetable.
+    throw TimetableParseException('Unable to read timetable PDF', ['$error']);
   }
+}
+
+/// Recover word bounds from exact character geometry, including when a PDF
+/// splits one time across several drawing runs. PDF coordinates have Y pointing
+/// up; store bottom/top as y0/y1 so row heights remain positive.
+List<_Word> _extractWords(PdfPageText page) {
+  final words = <_Word>[];
+  var firstRun = 0;
+  for (final match in RegExp(r'\S+').allMatches(page.text)) {
+    // Extraction indexes are ordered. Limit geometry lookup to the runs that
+    // overlap this word instead of rescanning the whole page for every cell.
+    while (firstRun < page.runs.length &&
+        page.runs[firstRun].startIndex + page.runs[firstRun].text.length <=
+            match.start) {
+      firstRun++;
+    }
+    var endRun = firstRun;
+    while (endRun < page.runs.length &&
+        page.runs[endRun].startIndex < match.end) {
+      endRun++;
+    }
+    final wordText = PdfPageText(
+      pageIndex: page.pageIndex,
+      text: page.text,
+      runs: page.runs.sublist(firstRun, endRun),
+    );
+    final rectangles = wordText.rectsFor(match.start, match.end);
+    if (rectangles.isEmpty) continue;
+    final left = rectangles.map((r) => r.left).reduce(math.min);
+    final right = rectangles.map((r) => r.right).reduce(math.max);
+    final bottom = rectangles.map((r) => r.bottom).reduce(math.min);
+    final top = rectangles.map((r) => r.top).reduce(math.max);
+    words.add(_Word(match.group(0)!, left, right, bottom, top));
+  }
+  return words;
 }
 
 int? _parseScheduleNumber(String text) {
@@ -202,8 +252,9 @@ int? _parseScheduleNumber(String text) {
 }
 
 String? _parseValidFrom(String text) {
-  final m = RegExp(r'VIGENTE DESDE EL (\d{1,2}) DE (\w+) DE (\d{4})')
-      .firstMatch(text);
+  final m = RegExp(
+    r'VIGENTE DESDE EL (\d{1,2}) DE (\w+) DE (\d{4})',
+  ).firstMatch(text);
   if (m == null) return null;
   final month = _monthNames[m.group(2)!];
   if (month == null) return null;
